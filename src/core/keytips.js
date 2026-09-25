@@ -84,6 +84,19 @@ export const KEYTIPS = {
       ],
     },
     {
+      key: 'JD', label: '図形の書式',
+      children: [
+        { key: 'SF', label: '図形の塗りつぶし', action: 'palette:fill' },
+        { key: 'SO', label: '図形の枠線', action: 'palette:stroke' },
+        { key: 'H', label: '高さ', action: 'input:height' },
+        { key: 'W', label: '幅', action: 'input:width' },
+        { key: 'AA', ...ALIGN },
+        { key: 'AF', label: '前面へ移動', action: 'reorder', args: 'forward' },
+        { key: 'AE', label: '背面へ移動', action: 'reorder', args: 'backward' },
+        { key: 'AY', label: '回転', children: ARRANGE.children.find((c) => c.key === 'O').children },
+      ],
+    },
+    {
       key: 'S', label: 'スライドショー',
       children: [
         { key: 'B', label: '最初から', action: 'showFromStart' },

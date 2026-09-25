@@ -173,6 +173,14 @@ export class Editor {
     });
   }
 
+  /** 幅 / 高さを数値で指定（Alt → J → D → W / H） */
+  setDimension(prop, value) {
+    if (!Number.isFinite(value)) return false;
+    return this.updateSelected((o) => {
+      o[prop] = Math.max(o.type === 'line' ? 0 : 1, Math.round(value));
+    });
+  }
+
   rotate(deg) {
     return this.updateSelected((o) => {
       o.rotation = (((o.rotation + deg) % 360) + 360) % 360;

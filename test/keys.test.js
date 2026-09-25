@@ -152,3 +152,10 @@ test('keyTipPaths で全アクションを列挙', () => {
   const tb = paths.find((p) => p.action === 'insertTextBox');
   assert.deepEqual(tb.keys, ['Alt', 'N', 'X']);
 });
+
+test('KeyTips: Alt,J,D,W で幅の入力', () => {
+  const s = new KeyTipSession();
+  assert.equal(s.press('J').type, 'pending');
+  assert.equal(s.press('D').type, 'node');
+  assert.equal(s.press('W').action, 'input:width');
+});
