@@ -9,10 +9,10 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; ch
 
 export function startServer(port = 0) {
   const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url, 'http://localhost');
-    const file = path.resolve(root, `.${decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname)}`);
-    if (!file.startsWith(root + path.sep)) { res.writeHead(403).end(); return; }
     try {
+      const url = new URL(req.url, 'http://localhost');
+      const file = path.resolve(root, `.${decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname)}`);
+      if (!file.startsWith(root + path.sep)) { res.writeHead(403).end(); return; }
       const body = await readFile(file);
       res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream' }).end(body);
     } catch {

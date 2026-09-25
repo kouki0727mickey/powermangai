@@ -229,3 +229,29 @@ test('幅・高さの数値指定（Alt → J → D → W / H）', async () => {
   assert.deepEqual([o.w, o.h], [960, 120]);
   assert.deepEqual(errors, []);
 });
+
+test('Alt → H → G → O → R で 90 度回転、F4 で繰り返し', async () => {
+  await fresh();
+  await alt('n', 's', 'h'); await keys('Enter');
+  await alt('h', 'g', 'o', 'r');
+  assert.equal(await ed(() => __pmg.editor.selectedObjects()[0].rotation), 90);
+  await keys('F4');
+  assert.equal(await ed(() => __pmg.editor.selectedObjects()[0].rotation), 180);
+});
+
+test('テキスト編集中の Tab はタブ文字を入力し、編集が続く', async () => {
+  await fresh();
+  await keys('Tab', 'Enter');
+  await page.keyboard.type('a');
+  await keys('Tab');
+  await page.keyboard.type('b');
+  await keys('Escape');
+  assert.equal(await ed(() => __pmg.editor.selectedObjects()[0].text), 'a\tb');
+});
+
+test('不正な URL でも開発サーバーは落ちない', async () => {
+  const r1 = await fetch(`${url}%E0`);
+  assert.equal(r1.status, 404);
+  const r2 = await fetch(url);
+  assert.equal(r2.status, 200);
+});

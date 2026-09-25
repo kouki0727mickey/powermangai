@@ -321,7 +321,7 @@ const TEXT_KEEP = new Set(['bold', 'italic', 'underline', 'fontGrow', 'fontShrin
 
 // ------------------------------------------------------------------ アクション
 const needSelection = () => { setStatus('図形が選択されていません（Tab で選択）'); return false; };
-const sel = (fn) => () => (editor.selection.length ? fn() : needSelection());
+const sel = (fn) => (args) => (editor.selection.length ? fn(args) : needSelection());
 
 async function confirmDiscard() {
   if (!isDirty()) return true;
@@ -463,7 +463,7 @@ const ACTIONS = {
   },
 
   // スライド
-  newSlide: () => { commitEdit(); editor.pane = editor.pane === 'slides' ? 'slides' : 'editor'; editor.newSlide(); },
+  newSlide: () => { commitEdit(); editor.newSlide(); },
   nextSlide: () => editor.gotoSlide(editor.slideIndex + 1),
   prevSlide: () => editor.gotoSlide(editor.slideIndex - 1),
   firstSlide: () => editor.gotoSlide(0),
@@ -925,7 +925,14 @@ function onKeyDown(e) {
     return;
   }
 
-  if (ctx === 'text') return; // 文字入力・カーソル移動などは textarea に任せる
+  if (ctx === 'text') {
+    // Tab はフォーカス移動ではなくタブ文字の入力（PowerPoint と同じ）。execCommand なら textarea の Undo も効く
+    if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      e.preventDefault();
+      if (!e.shiftKey && !document.execCommand('insertText', false, '\t')) textEditor.setRangeText('\t', textEditor.selectionStart, textEditor.selectionEnd, 'end');
+    }
+    return; // 文字入力・カーソル移動などは textarea に任せる
+  }
 
   // 図形を選択した状態で文字を入力すると、その図形の文字を置き換えて編集開始（PowerPoint と同じ）。
   // preventDefault しないので文字は textarea に入り、input イベントで編集が始まる。

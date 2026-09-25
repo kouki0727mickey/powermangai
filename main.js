@@ -9,6 +9,8 @@ const PRES_FILTERS = [{ name: 'PowerMangai プレゼンテーション', extensi
 const IMAGE_FILTERS = [{ name: '画像', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'] }];
 const IMAGE_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.bmp': 'image/bmp', '.webp': 'image/webp' };
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+// レンダラーから上書き保存できるのは、ユーザーがダイアログで選んだパスだけ
+const approvedPaths = new Set();
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -40,20 +42,22 @@ ipcMain.handle('file:open', async (e) => {
   const r = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: PRES_FILTERS });
   if (r.canceled || r.filePaths.length === 0) return null;
   const filePath = r.filePaths[0];
+  approvedPaths.add(filePath);
   return { path: filePath, content: await readFile(filePath, 'utf8') };
 });
 
 ipcMain.handle('file:save', async (e, { filePath, content, saveAs }) => {
   if (typeof content !== 'string') throw new Error('invalid content');
-  let target = filePath;
+  let target = filePath && approvedPaths.has(filePath) ? filePath : null;
   if (!target || saveAs) {
     const win = BrowserWindow.fromWebContents(e.sender);
     const r = await dialog.showSaveDialog(win, {
-      defaultPath: target || 'presentation.pmg.json',
+      defaultPath: target || (filePath ? path.basename(String(filePath)) : 'presentation.pmg.json'),
       filters: PRES_FILTERS,
     });
     if (r.canceled || !r.filePath) return null;
     target = r.filePath;
+    approvedPaths.add(target);
   }
   await writeFile(target, content, 'utf8');
   return { path: target };
