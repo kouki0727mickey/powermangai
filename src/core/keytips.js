@@ -110,6 +110,7 @@ export const KEYTIPS = {
         { key: 'I', label: 'お手本画像を読み込む', action: 'loadTargetImage' },
         { key: 'S', label: '採点する', action: 'score' },
         { key: 'H', label: 'お手本の表示 / 非表示', action: 'toggleTarget' },
+        { key: 'T', label: 'ヒントの表示 / 非表示', action: 'toggleHints' },
         { key: 'R', label: '課題をやり直す', action: 'restartChallenge' },
         { key: 'K', label: 'ショートカット一覧', action: 'help' },
       ],

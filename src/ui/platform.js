@@ -1,0 +1,68 @@
+// Electron（window.pmg）とブラウザ（開発・テスト用）の差異を吸収する
+
+const api = globalThis.pmg || null;
+export const isElectron = !!api;
+
+function pickFile(accept) {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = accept;
+    input.style.display = 'none';
+    input.addEventListener('change', () => {
+      resolve(input.files[0] || null);
+      input.remove();
+    });
+    input.addEventListener('cancel', () => { resolve(null); input.remove(); });
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
+function readAs(file, method) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+    r[method](file);
+  });
+}
+
+/** @returns {Promise<{path: string, content: string} | null>} */
+export async function openPresentationFile() {
+  if (api) return api.openFile();
+  const file = await pickFile('.json,application/json');
+  if (!file) return null;
+  return { path: file.name, content: await readAs(file, 'readAsText') };
+}
+
+/** @returns {Promise<{path: string} | null>} */
+export async function savePresentationFile(path, content, saveAs) {
+  if (api) return api.saveFile(path, content, saveAs);
+  const name = (saveAs || !path ? prompt('ファイル名', path || 'presentation.pmg.json') : path);
+  if (!name) return null;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  return { path: name };
+}
+
+/** @returns {Promise<{name: string, dataUrl: string} | null>} */
+export async function openImageFile() {
+  if (api) return api.openImage();
+  const file = await pickFile('image/*');
+  if (!file) return null;
+  return { name: file.name, dataUrl: await readAs(file, 'readAsDataURL') };
+}
+
+export async function setFullScreen(flag) {
+  try {
+    if (api) await api.setFullScreen(flag);
+    else if (flag && !document.fullscreenElement) await document.documentElement.requestFullscreen();
+    else if (!flag && document.fullscreenElement) await document.exitFullscreen();
+  } catch {
+    // 全画面にできなくてもスライドショーは続行する
+  }
+}

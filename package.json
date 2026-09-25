@@ -7,10 +7,12 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.js",
-    "serve": "node scripts/serve.js"
+    "serve": "node scripts/serve.js",
+    "test:e2e": "node --test test/e2e/*.e2e.js"
   },
   "license": "MIT",
   "devDependencies": {
-    "electron": "^44.4.5"
+    "electron": "^44.4.5",
+    "playwright-core": "^1.56.1"
   }
 }
