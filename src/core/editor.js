@@ -1,14 +1,21 @@
 // エディター状態と編集コマンド（Undo/Redo 付き）。DOM には依存しない。
 import {
-  SLIDE_W, SLIDE_H, clone, createObject, createSlide, createPresentation, newId, bounds, hasText,
+  clone, createObject, createSlide, createPresentation, newId, bounds, hasText, objText, isLine,
 } from './model.js';
+import {
+  fromPlainText, applyFontAll, allRunFonts, normalizeParagraph, MAX_LEVEL,
+} from './richtext.js';
+import { layoutObjectText, approxMeasure } from './textlayout.js';
+import { findTheme } from './colors.js';
 
 export const FONT_SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96];
 const HISTORY_LIMIT = 200;
 const PASTE_OFFSET = 16;
 
 export class Editor {
-  constructor(pres = createPresentation()) {
+  /** options.measure(font, text): 文字幅の計測（画面では canvas、テストでは概算） */
+  constructor(pres = createPresentation(), options = {}) {
+    this.measure = options.measure || approxMeasure;
     this.pres = pres;
     this.slideIndex = 0;
     this.selection = [];
@@ -55,6 +62,7 @@ export class Editor {
     const before = this.snapshot();
     const presBefore = JSON.stringify(this.pres);
     const result = fn();
+    this.fitAll();
     if (JSON.stringify(this.pres) !== presBefore) {
       this.undoStack.push(before);
       if (this.undoStack.length > HISTORY_LIMIT) this.undoStack.shift();
@@ -62,6 +70,20 @@ export class Editor {
     }
     this.emit();
     return result;
+  }
+
+  get theme() { return findTheme(this.pres.theme); }
+  get size() { return { width: this.pres.width, height: this.pres.height }; }
+
+  /** 「テキストに合わせて図形のサイズを調整」: 文字の量に合わせて高さを変える */
+  fitText(o) {
+    if (o.autoFit !== 'shape' || !hasText(o)) return;
+    const h = Math.round(layoutObjectText(o, this.measure, this.theme).contentHeight * 10) / 10;
+    if (Math.abs(o.h - h) > 0.05) o.h = h;
+  }
+
+  fitAll() {
+    for (const s of this.pres.slides) for (const o of s.objects) this.fitText(o);
   }
 
   undo() {
@@ -134,8 +156,9 @@ export class Editor {
   insertObject(type, props = {}) {
     return this.mutate(() => {
       const obj = createObject(type, props);
-      if (props.x === undefined) obj.x = Math.round((SLIDE_W - obj.w) / 2);
-      if (props.y === undefined) obj.y = Math.round((SLIDE_H - obj.h) / 2);
+      this.fitText(obj);
+      if (props.x === undefined) obj.x = Math.round((this.pres.width - obj.w) / 2);
+      if (props.y === undefined) obj.y = Math.round((this.pres.height - obj.h) / 2);
       this.slide.objects.push(obj);
       this.selection = [obj.id];
       this.editingId = null;
@@ -187,67 +210,152 @@ export class Editor {
     });
   }
 
-  // ---- 書式 ----
+  // ---- 書式（図形を選択した状態では、図形内のすべての文字に適用） ----
+  textObjects() { return this.selectedObjects().filter(hasText); }
+
   toggleFont(prop) {
-    const objs = this.selectedObjects().filter(hasText);
+    const objs = this.textObjects();
     if (objs.length === 0) return false;
-    const value = !objs.every((o) => o.font[prop]);
-    this.mutate(() => { for (const o of objs) o.font[prop] = value; });
+    const value = !objs.every((o) => allRunFonts(o.paragraphs).every((f) => f[prop]));
+    this.mutate(() => { for (const o of objs) applyFontAll(o.paragraphs, (f) => { f[prop] = value; }); });
+    return true;
+  }
+
+  /** 上付き / 下付きの切り替え */
+  toggleBaseline(kind) {
+    const objs = this.textObjects();
+    if (objs.length === 0) return false;
+    const value = objs.every((o) => allRunFonts(o.paragraphs).every((f) => f.baseline === kind)) ? 0 : kind;
+    this.mutate(() => { for (const o of objs) applyFontAll(o.paragraphs, (f) => { f.baseline = value; }); });
     return true;
   }
 
   setFont(prop, value) {
-    return this.updateSelected((o) => { if (hasText(o)) o.font[prop] = value; });
+    const objs = this.textObjects();
+    if (objs.length === 0) return false;
+    this.mutate(() => { for (const o of objs) applyFontAll(o.paragraphs, (f) => { f[prop] = value; }); });
+    return true;
+  }
+
+  /** フォント ダイアログ: 複数のプロパティをまとめて設定 */
+  setFontProps(props) {
+    const objs = this.textObjects();
+    if (objs.length === 0) return false;
+    this.mutate(() => { for (const o of objs) applyFontAll(o.paragraphs, (f) => Object.assign(f, props)); });
+    return true;
   }
 
   changeFontSize(dir) {
-    return this.updateSelected((o) => {
-      if (!hasText(o)) return;
-      o.font.size = stepFontSize(o.font.size, dir);
-    });
+    const objs = this.textObjects();
+    if (objs.length === 0) return false;
+    this.mutate(() => { for (const o of objs) applyFontAll(o.paragraphs, (f) => { f.size = stepFontSize(f.size, dir); }); });
+    return true;
   }
 
   clearCharFormat() {
-    return this.updateSelected((o) => {
-      if (!hasText(o)) return;
-      o.font.bold = false;
-      o.font.italic = false;
-      o.font.underline = false;
-    });
-  }
-
-  changeCase() {
-    const objs = this.selectedObjects().filter((o) => o.text);
+    const objs = this.textObjects();
     if (objs.length === 0) return false;
     this.mutate(() => {
-      for (const o of objs) o.text = nextCase(o.text);
+      for (const o of objs) {
+        applyFontAll(o.paragraphs, (f) => { f.bold = false; f.italic = false; f.underline = false; f.strike = false; f.baseline = 0; });
+      }
     });
     return true;
   }
 
-  setAlign(align) {
-    return this.updateSelected((o) => { if (hasText(o)) o.align = align; });
+  changeCase() {
+    const objs = this.textObjects().filter((o) => objText(o));
+    if (objs.length === 0) return false;
+    this.mutate(() => {
+      for (const o of objs) {
+        const next = nextCase(objText(o));
+        // ランの境界を保ったまま文字だけ置き換える（大文字小文字の変換で文字数は変わらない前提。変わる場合は全体を置換）
+        if (next.length === objText(o).length) {
+          let k = 0;
+          const flat = next.replace(/\n/g, '');
+          for (const p of o.paragraphs) for (const r of p.runs) { r.text = Array.from(r.text).map((ch) => (ch === '\n' ? ch : flat[k++])).join(''); }
+        } else {
+          o.paragraphs = fromPlainText(next, o.paragraphs[0].runs[0].font, { align: o.paragraphs[0].align });
+        }
+      }
+    });
+    return true;
+  }
+
+  /** 段落の書式（配置・箇条書き・行間など）を図形内のすべての段落に適用 */
+  setParagraphProp(prop, value) {
+    const objs = this.textObjects();
+    if (objs.length === 0) return false;
+    this.mutate(() => { for (const o of objs) for (const p of o.paragraphs) p[prop] = value; });
+    return true;
+  }
+
+  setAlign(align) { return this.setParagraphProp('align', align); }
+
+  /** 箇条書き / 段落番号の切り替え（すべての段落が同じ種類なら解除） */
+  toggleBullet(kind) {
+    const objs = this.textObjects();
+    if (objs.length === 0) return false;
+    const all = objs.every((o) => o.paragraphs.every((p) => p.bullet === kind));
+    return this.setParagraphProp('bullet', all ? 'none' : kind);
+  }
+
+  /** インデントのレベルを増減（Alt+Shift+→ / ←） */
+  changeLevel(dir) {
+    const objs = this.textObjects();
+    if (objs.length === 0) return false;
+    this.mutate(() => {
+      for (const o of objs) for (const p of o.paragraphs) p.level = Math.max(0, Math.min(MAX_LEVEL, p.level + dir));
+    });
+    return true;
+  }
+
+  setObjectProp(prop, value, filter = () => true) {
+    const objs = this.selectedObjects().filter(filter);
+    if (objs.length === 0) return false;
+    this.mutate(() => { for (const o of objs) o[prop] = value; });
+    return true;
   }
 
   setFill(color) {
-    return this.updateSelected((o) => { if (o.type !== 'line') o.fill = color; });
+    return this.setObjectProp('fill', color, (o) => !isLine(o) && o.type !== 'image');
   }
 
   setStroke(color) {
-    return this.updateSelected((o) => { o.stroke = color; });
+    return this.setObjectProp('stroke', color);
   }
 
+  /** 図形の文字をプレーンテキストで置き換える（先頭の文字の書式を引き継ぐ） */
   setText(id, text) {
     const obj = this.findObject(id);
-    if (!obj || obj.text === text) return false;
-    this.mutate(() => { obj.text = text; });
+    if (!obj || objText(obj) === text) return false;
+    this.mutate(() => {
+      const p0 = obj.paragraphs[0];
+      const { runs, ...props } = p0;
+      obj.paragraphs = fromPlainText(text, runs[0].font, props);
+    });
+    return true;
+  }
+
+  /** 図形の文字を段落ごと置き換える（リッチテキスト編集の確定） */
+  setParagraphs(id, paragraphs) {
+    const obj = this.findObject(id);
+    if (!obj) return false;
+    const next = paragraphs.map((p) => normalizeParagraph({ ...p, runs: p.runs.map((r) => ({ text: r.text, font: { ...r.font } })) }));
+    if (JSON.stringify(next) === JSON.stringify(obj.paragraphs)) return false;
+    this.mutate(() => { obj.paragraphs = next; });
     return true;
   }
 
   copyFormat() {
     const [o] = this.selectedObjects();
     if (!o) return false;
-    this.formatClipboard = clone({ fill: o.fill, stroke: o.stroke, strokeWidth: o.strokeWidth, font: o.font, align: o.align });
+    const p0 = o.paragraphs?.[0];
+    this.formatClipboard = clone({
+      fill: o.fill, stroke: o.stroke, strokeWidth: o.strokeWidth, dash: o.dash, opacity: o.opacity, shadow: o.shadow,
+      font: p0 ? p0.runs[0].font : null,
+      para: p0 ? { align: p0.align, bullet: p0.bullet, lineSpacing: p0.lineSpacing } : null,
+    });
     return true;
   }
 
@@ -255,11 +363,16 @@ export class Editor {
     if (!this.formatClipboard) return false;
     const f = this.formatClipboard;
     return this.updateSelected((o) => {
-      if (o.type !== 'line') o.fill = f.fill;
+      if (!isLine(o) && o.type !== 'image') o.fill = f.fill;
       o.stroke = f.stroke;
       o.strokeWidth = f.strokeWidth;
-      o.font = { ...f.font };
-      o.align = f.align;
+      o.dash = f.dash;
+      o.opacity = f.opacity;
+      o.shadow = f.shadow;
+      if (hasText(o) && f.font) {
+        applyFontAll(o.paragraphs, (font) => Object.assign(font, clone(f.font)));
+        for (const p of o.paragraphs) Object.assign(p, f.para);
+      }
     });
   }
 
@@ -296,7 +409,7 @@ export class Editor {
     const objs = this.selectedObjects();
     if (objs.length === 0) return false;
     const toSlide = this.units().filter((u) => u.some((id) => this.selection.includes(id))).length < 2;
-    const ref = toSlide ? { x: 0, y: 0, w: SLIDE_W, h: SLIDE_H } : bounds(objs);
+    const ref = toSlide ? { x: 0, y: 0, w: this.pres.width, h: this.pres.height } : bounds(objs);
     this.mutate(() => {
       // グループは 1 単位として動かす
       for (const unit of this.selectedUnits()) {
@@ -329,7 +442,7 @@ export class Editor {
     let start, end;
     if (items.length < 3) {
       start = 0;
-      end = axis === 'h' ? SLIDE_W : SLIDE_H;
+      end = axis === 'h' ? this.pres.width : this.pres.height;
     } else {
       start = items[0].b[P];
       end = Math.max(...items.map((i) => i.b[P] + i.b[S]));
@@ -428,21 +541,45 @@ export class Editor {
   startEdit() {
     if (!this.canEdit()) return false;
     this.editingId = this.selection[0];
+    this.editBefore = this.snapshot();
+    this.editPresBefore = JSON.stringify(this.pres);
     this.emit();
     return true;
   }
 
+  /** 編集中の文字をその場で反映（履歴には積まない。自動調整の高さやサムネイルを更新するため） */
+  previewEdit(paragraphs) {
+    const obj = this.editingId && this.findObject(this.editingId);
+    if (!obj) return;
+    obj.paragraphs = paragraphs.map((p) => normalizeParagraph({ ...p, runs: p.runs.map((r) => ({ text: r.text, font: { ...r.font } })) }));
+    this.fitText(obj);
+    this.emit();
+  }
+
+  /** 編集を終了。text は段落の配列かプレーンテキスト。編集全体を 1 回の操作として履歴に積む */
   endEdit(text) {
     const id = this.editingId;
     if (!id) return;
+    const obj = this.findObject(id);
+    if (obj && Array.isArray(text)) {
+      obj.paragraphs = text.map((p) => normalizeParagraph({ ...p, runs: p.runs.map((r) => ({ text: r.text, font: { ...r.font } })) }));
+    } else if (obj && typeof text === 'string' && text !== objText(obj)) {
+      const { runs, ...props } = obj.paragraphs[0];
+      obj.paragraphs = fromPlainText(text, runs[0].font, props);
+    }
+    if (obj) this.fitText(obj);
     this.editingId = null;
-    if (text !== undefined && this.setText(id, text)) return;
+    if (JSON.stringify(this.pres) !== this.editPresBefore) {
+      this.undoStack.push(this.editBefore);
+      if (this.undoStack.length > HISTORY_LIMIT) this.undoStack.shift();
+      this.redoStack = [];
+    }
     this.emit();
   }
 
   /** Ctrl+Enter：次のテキスト プレースホルダーへ。最後なら新しいスライド */
   nextPlaceholder() {
-    const texts = this.slide.objects.filter((o) => o.type === 'text');
+    const texts = this.slide.objects.filter((o) => o.ph);
     const cur = texts.findIndex((o) => this.selection.includes(o.id));
     if (cur + 1 < texts.length) {
       this.setSelection([texts[cur + 1].id]);
@@ -466,7 +603,7 @@ export class Editor {
   newSlide(layout) {
     this.mutate(() => {
       const l = layout || (this.pres.slides.length === 0 ? 'title' : 'titleContent');
-      this.pres.slides.splice(this.slideIndex + 1, 0, createSlide(l));
+      this.pres.slides.splice(this.slideIndex + 1, 0, createSlide(l, this.size));
       this.slideIndex += 1;
       this.selection = [];
       this.editingId = null;
@@ -487,7 +624,7 @@ export class Editor {
   deleteSlide() {
     this.mutate(() => {
       this.pres.slides.splice(this.slideIndex, 1);
-      if (this.pres.slides.length === 0) this.pres.slides.push(createSlide('blank'));
+      if (this.pres.slides.length === 0) this.pres.slides.push(createSlide('blank', this.size));
       this.slideIndex = Math.min(this.slideIndex, this.pres.slides.length - 1);
       this.selection = [];
       this.editingId = null;
@@ -526,10 +663,12 @@ export function nextCase(text) {
   return upper;
 }
 
-function reidObjects(objs) {
+function reidObjects(objs, idMap = new Map()) {
   const groupMap = new Map();
   for (const o of objs) {
-    o.id = newId('o');
+    const nid = newId('o');
+    idMap.set(o.id, nid);
+    o.id = nid;
     if (o.groupId) {
       if (!groupMap.has(o.groupId)) groupMap.set(o.groupId, newId('g'));
       o.groupId = groupMap.get(o.groupId);
@@ -540,6 +679,9 @@ function reidObjects(objs) {
 
 function reidSlide(slide) {
   slide.id = newId('s');
-  reidObjects(slide.objects);
+  const idMap = new Map();
+  reidObjects(slide.objects, idMap);
+  // アニメーションの対象も新しい ID に付け替える
+  slide.animations = (slide.animations || []).filter((a) => idMap.has(a.target)).map((a) => ({ ...a, target: idMap.get(a.target) }));
   return slide;
 }

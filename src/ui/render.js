@@ -1,190 +1,299 @@
 // Canvas へのスライド描画（編集画面・サムネイル・スライドショー・お手本画像で共通）
-import { SLIDE_W, SLIDE_H, bounds } from '../core/model.js';
-import { wrapText } from '../core/textlayout.js';
+import { SLIDE_W, SLIDE_H, bounds, isLine, hasText } from '../core/model.js';
+import { layoutObjectText, effectiveFont } from '../core/textlayout.js';
+import { buildShape, buildDetail, EVENODD } from '../core/shapes.js';
+import { resolveColor, findTheme, DEFAULT_THEME } from '../core/colors.js';
+import { tableLayout } from '../core/table.js';
 
-export const TEXT_INSET = 8;
 const FONT_FALLBACK = '"Yu Gothic UI", "Yu Gothic", Meiryo, "Hiragino Sans", "Noto Sans CJK JP", "Noto Sans JP", sans-serif';
 
+/** font は effectiveFont 済み（family 解決済み）を想定 */
 export function fontCss(font) {
-  const family = font.family ? `"${font.family.replace(/"/g, '')}", ${FONT_FALLBACK}` : FONT_FALLBACK;
+  const family = font.family && font.family[0] !== '+' ? `"${font.family.replace(/"/g, '')}", ${FONT_FALLBACK}` : FONT_FALLBACK;
   return `${font.italic ? 'italic ' : ''}${font.bold ? 'bold ' : ''}${font.size}px ${family}`;
 }
 
-function shapePath(ctx, o) {
-  const { w, h } = o;
-  ctx.beginPath();
-  switch (o.type) {
-    case 'text':
-    case 'rect':
-      ctx.rect(0, 0, w, h);
-      break;
-    case 'roundRect': {
-      const r = Math.min(w, h) * 0.1667;
-      ctx.moveTo(r, 0);
-      ctx.arcTo(w, 0, w, h, r);
-      ctx.arcTo(w, h, 0, h, r);
-      ctx.arcTo(0, h, 0, 0, r);
-      ctx.arcTo(0, 0, w, 0, r);
-      ctx.closePath();
-      break;
-    }
-    case 'ellipse':
-      ctx.ellipse(w / 2, h / 2, Math.max(w / 2, 0), Math.max(h / 2, 0), 0, 0, Math.PI * 2);
-      break;
-    case 'triangle':
-      ctx.moveTo(w / 2, 0);
-      ctx.lineTo(w, h);
-      ctx.lineTo(0, h);
-      ctx.closePath();
-      break;
-    case 'diamond':
-      ctx.moveTo(w / 2, 0);
-      ctx.lineTo(w, h / 2);
-      ctx.lineTo(w / 2, h);
-      ctx.lineTo(0, h / 2);
-      ctx.closePath();
-      break;
-    case 'rightArrow': {
-      const head = Math.min(w, h * 0.5);
-      const t = h * 0.25;
-      ctx.moveTo(0, t);
-      ctx.lineTo(w - head, t);
-      ctx.lineTo(w - head, 0);
-      ctx.lineTo(w, h / 2);
-      ctx.lineTo(w - head, h);
-      ctx.lineTo(w - head, h - t);
-      ctx.lineTo(0, h - t);
-      ctx.closePath();
-      break;
-    }
-    case 'star': {
-      const cx = w / 2, cy = h / 2;
-      for (let i = 0; i < 10; i++) {
-        const r = i % 2 === 0 ? 1 : 0.382;
-        const a = -Math.PI / 2 + (i * Math.PI) / 5;
-        const x = cx + Math.cos(a) * (w / 2) * r;
-        const y = cy + Math.sin(a) * (h / 2) * r;
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      }
-      ctx.closePath();
-      break;
-    }
-    case 'line':
-      ctx.moveTo(0, 0);
-      ctx.lineTo(w, h);
-      break;
-    default:
-      ctx.rect(0, 0, w, h);
+// ---- 文字幅の計測（キャッシュ付き）
+let measureCtx = null;
+const measureCache = new Map();
+export function measureText(font, text) {
+  const css = fontCss(font);
+  const key = `${css}\u0000${text}`;
+  let w = measureCache.get(key);
+  if (w === undefined) {
+    if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
+    measureCtx.font = css;
+    w = measureCtx.measureText(text).width;
+    if (measureCache.size > 20000) measureCache.clear();
+    measureCache.set(key, w);
   }
+  return w;
 }
 
-function drawText(ctx, o, showPlaceholder) {
-  let text = o.text;
-  let color = o.font.color;
-  let placeholder = false;
-  if (!text && showPlaceholder && o.placeholder) {
-    text = o.placeholder;
-    color = '#8c8c8c';
-    placeholder = true;
+// ---- 画像のキャッシュ（読み込み完了時に再描画を依頼）
+const images = new Map();
+let onImageLoad = () => {};
+export function setImageLoadCallback(fn) { onImageLoad = fn; }
+function getImage(src) {
+  let img = images.get(src);
+  if (!img) {
+    img = new Image();
+    img.onload = () => onImageLoad();
+    img.src = src;
+    images.set(src, img);
   }
-  if (!text) return;
-  ctx.font = fontCss(o.font);
-  ctx.fillStyle = color;
-  ctx.textBaseline = 'alphabetic';
-  const maxW = Math.max(1, o.w - TEXT_INSET * 2);
-  const lines = wrapText(text, maxW, (s) => ctx.measureText(s).width);
-  const lineH = o.font.size * 1.2;
-  const totalH = lines.length * lineH;
-  let y = o.type === 'text' ? TEXT_INSET : (o.h - totalH) / 2;
-  if (placeholder) ctx.globalAlpha = 0.9;
-  lines.forEach((line, i) => {
-    const justify = o.align === 'justify' && i < lines.length - 1 && line.includes(' ');
-    const width = ctx.measureText(line).width;
-    let x = TEXT_INSET;
-    if (o.align === 'center') x = (o.w - width) / 2;
-    else if (o.align === 'right') x = o.w - TEXT_INSET - width;
-    const baseline = y + o.font.size * 0.95;
-    if (justify) {
-      drawJustified(ctx, line, TEXT_INSET, baseline, maxW);
-    } else {
-      ctx.fillText(line, x, baseline);
-    }
-    if (o.font.underline && line) {
-      const uw = justify ? maxW : width;
-      const ux = justify ? TEXT_INSET : x;
-      ctx.fillRect(ux, baseline + Math.max(1, o.font.size * 0.08), uw, Math.max(1, o.font.size / 16));
-    }
-    y += lineH;
-  });
-  ctx.globalAlpha = 1;
+  return img.complete && img.naturalWidth ? img : null;
 }
 
-function drawJustified(ctx, line, x, y, maxW) {
-  const words = line.split(' ');
-  const wordsW = words.reduce((s, w) => s + ctx.measureText(w).width, 0);
-  const gap = (maxW - wordsW) / (words.length - 1);
-  for (const w of words) {
-    ctx.fillText(w, x, y);
-    x += ctx.measureText(w).width + gap;
-  }
-}
+const DASH = {
+  solid: [], dash: [4, 3], dot: [1, 1], dashDot: [4, 3, 1, 3], longDash: [8, 3],
+};
 
-export function drawObject(ctx, o, { showPlaceholder = false, hideText = false } = {}) {
+function drawArrowHead(ctx, x1, y1, x2, y2, size, color) {
+  const a = Math.atan2(y2 - y1, x2 - x1);
   ctx.save();
-  ctx.translate(o.x + o.w / 2, o.y + o.h / 2);
-  ctx.rotate((o.rotation * Math.PI) / 180);
-  ctx.translate(-o.w / 2, -o.h / 2);
-  shapePath(ctx, o);
-  if (o.fill && o.type !== 'line') {
-    ctx.fillStyle = o.fill;
-    ctx.fill();
-  }
-  if (o.stroke && o.strokeWidth > 0) {
-    ctx.strokeStyle = o.stroke;
-    ctx.lineWidth = o.strokeWidth;
-    ctx.stroke();
-  }
-  if (o.type !== 'line' && !hideText) drawText(ctx, o, showPlaceholder);
+  ctx.fillStyle = color;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(x2 - size * Math.cos(a - 0.45), y2 - size * Math.sin(a - 0.45));
+  ctx.lineTo(x2 - size * Math.cos(a + 0.45), y2 - size * Math.sin(a + 0.45));
+  ctx.closePath();
+  ctx.fill();
   ctx.restore();
 }
 
+/** 段落のレイアウト結果を描画（原点はオブジェクトの左上） */
+export function drawTextLines(ctx, lines, theme) {
+  ctx.textBaseline = 'alphabetic';
+  for (const ln of lines) {
+    if (ln.bullet) {
+      ctx.font = fontCss(ln.bullet.font);
+      ctx.fillStyle = resolveColor(ln.bullet.font.color, theme);
+      ctx.fillText(ln.bullet.text, ln.bullet.x, ln.baseline);
+    }
+    for (const s of ln.segs) {
+      const f = s.font;
+      ctx.font = fontCss(f);
+      const color = resolveColor(f.color, theme);
+      ctx.fillStyle = color;
+      const y = ln.baseline + (f.dy || 0);
+      ctx.fillText(s.text, s.x, y);
+      const lw = Math.max(1, f.base / 16);
+      if (f.underline && s.text.trim()) ctx.fillRect(s.x, y + Math.max(1, f.base * 0.1), s.w, lw);
+      if (f.strike && s.text.trim()) ctx.fillRect(s.x, y - f.size * 0.3, s.w, lw);
+    }
+  }
+}
+
+function placeholderView(o) {
+  // プレースホルダーのプロンプト文字（灰色）
+  const p0 = o.paragraphs[0];
+  return {
+    ...o,
+    paragraphs: [{ ...p0, runs: [{ text: o.placeholder, font: { ...p0.runs[0].font, color: '#8C8C8C' } }] }],
+  };
+}
+
+function drawTable(ctx, o, theme) {
+  const lay = tableLayout(o);
+  const accent = resolveColor('@accent1', theme);
+  o.cells.forEach((row, r) => row.forEach((cell, c) => {
+    const x = lay.xs[c], y = lay.ys[r], w = o.colWidths[c], h = lay.heights[r];
+    let fill = cell.fill;
+    if (fill == null) {
+      if (o.headerRow && r === 0) fill = '@accent1';
+      else if (o.bandedRows) fill = (r - (o.headerRow ? 1 : 0)) % 2 === 0 ? '@accent1:0.8' : '@accent1:0.9';
+    }
+    if (fill) {
+      ctx.fillStyle = resolveColor(fill, theme);
+      ctx.fillRect(x, y, w, h);
+    }
+    const cellObj = { type: 'rect', w, h, inset: o.cellInset || { l: 7.2, t: 3.6, r: 7.2, b: 3.6 }, anchor: 'top', wrap: true, paragraphs: cell.paragraphs };
+    const { lines } = layoutObjectText(cellObj, measureText, theme);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.beginPath();
+    ctx.rect(0, 0, w, h);
+    ctx.clip();
+    drawTextLines(ctx, lines, theme);
+    ctx.restore();
+  }));
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.lineWidth = 1;
+  for (const x of lay.xs.slice(1, -1)) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, lay.total); ctx.stroke(); }
+  for (const y of lay.ys.slice(1, -1)) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(o.w, y); ctx.stroke(); }
+  if (!o.headerRow && !o.bandedRows) {
+    ctx.strokeStyle = accent;
+    ctx.strokeRect(0, 0, o.w, lay.total);
+  }
+}
+
 /**
- * slide を ctx に描画。ctx のサイズは任意で、SLIDE_W×SLIDE_H を拡大縮小して収める。
- * opts.hideTextOf: テキスト編集中のオブジェクト ID（テキストは textarea で表示するため描かない）
+ * オブジェクトを描画。opts:
+ *   theme, showPlaceholder, hideText（編集中は DOM で表示するため描かない）, pixelScale（影のずれの換算用）
+ */
+export function drawObject(ctx, o, opts = {}) {
+  const theme = opts.theme || DEFAULT_THEME;
+  const px = opts.pixelScale || 1;
+  ctx.save();
+  ctx.translate(o.x + o.w / 2, o.y + o.h / 2);
+  ctx.rotate((o.rotation * Math.PI) / 180);
+  ctx.globalAlpha *= o.opacity ?? 1;
+
+  ctx.save();
+  ctx.scale(o.flipH ? -1 : 1, o.flipV ? -1 : 1);
+  ctx.translate(-o.w / 2, -o.h / 2);
+  if (o.shadow) {
+    ctx.shadowColor = 'rgba(0,0,0,0.4)';
+    ctx.shadowBlur = 4 * px;
+    ctx.shadowOffsetX = 3 * px;
+    ctx.shadowOffsetY = 3 * px;
+  }
+  if (o.type === 'image') {
+    const img = getImage(o.src);
+    if (img) ctx.drawImage(img, 0, 0, o.w, o.h);
+    else { ctx.fillStyle = '#E7E6E6'; ctx.fillRect(0, 0, o.w, o.h); }
+    ctx.shadowColor = 'transparent';
+    if (o.stroke && o.strokeWidth > 0) {
+      ctx.strokeStyle = resolveColor(o.stroke, theme);
+      ctx.lineWidth = o.strokeWidth;
+      ctx.strokeRect(0, 0, o.w, o.h);
+    }
+  } else if (o.type === 'table') {
+    ctx.shadowColor = 'transparent';
+    drawTable(ctx, o, theme);
+  } else {
+    ctx.beginPath();
+    buildShape(ctx, o.type, o.w, o.h);
+    const fill = resolveColor(o.fill, theme);
+    if (fill && !isLine(o)) {
+      ctx.fillStyle = fill;
+      ctx.fill(EVENODD.has(o.type) ? 'evenodd' : 'nonzero');
+      ctx.shadowColor = 'transparent';
+    }
+    const stroke = resolveColor(o.stroke, theme);
+    if (stroke && o.strokeWidth > 0) {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = o.strokeWidth;
+      ctx.setLineDash((DASH[o.dash] || []).map((d) => d * Math.max(1, o.strokeWidth)));
+      ctx.stroke();
+      ctx.shadowColor = 'transparent';
+      ctx.beginPath();
+      if (buildDetail(ctx, o.type, o.w, o.h)) ctx.stroke();
+      ctx.setLineDash([]);
+      const head = 3 + o.strokeWidth * 3;
+      if (o.type === 'arrow' || o.type === 'doubleArrow') drawArrowHead(ctx, 0, 0, o.w, o.h, head, stroke);
+      if (o.type === 'doubleArrow') drawArrowHead(ctx, o.w, o.h, 0, 0, head, stroke);
+    }
+  }
+  ctx.restore();
+
+  if (hasText(o) && !opts.hideText) {
+    let view = o;
+    if (opts.showPlaceholder && o.placeholder && o.paragraphs.every((p) => p.runs.every((r) => !r.text))) view = placeholderView(o);
+    if (view.paragraphs.some((p) => p.runs.some((r) => r.text))) {
+      // 上下反転した図形の文字は 180° 回転（左右反転では文字は反転しない）
+      if (o.flipV) ctx.rotate(Math.PI);
+      ctx.translate(-o.w / 2, -o.h / 2);
+      const { lines } = layoutObjectText(view, measureText, theme);
+      drawTextLines(ctx, lines, theme);
+    }
+  }
+  ctx.restore();
+}
+
+/** ヘッダーとフッター（スライド番号・フッター・日付） */
+function drawHeaderFooter(ctx, pres, slide, index, theme) {
+  const hf = pres.headerFooter;
+  if (!hf || (hf.hideOnTitle && slide.layout === 'title')) return;
+  const W = pres.width, H = pres.height;
+  const font = effectiveFont({ family: '+minor', size: 12, bold: false, italic: false, color: '@tx1:0.5', baseline: 0 }, theme);
+  ctx.font = fontCss(font);
+  ctx.fillStyle = resolveColor(font.color, theme);
+  const y = H - 22;
+  if (hf.slideNumber) { ctx.textAlign = 'right'; ctx.fillText(String(index + 1), W - 40, y); }
+  if (hf.showFooter && hf.footer) { ctx.textAlign = 'center'; ctx.fillText(hf.footer, W / 2, y); }
+  if (hf.date) {
+    ctx.textAlign = 'left';
+    const d = new Date();
+    ctx.fillText(`${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`, 40, y);
+  }
+  ctx.textAlign = 'left';
+}
+
+/**
+ * slide を ctx 全体に拡大縮小して描画。opts:
+ *   pres（テーマ・サイズ・ヘッダーとフッター）, index（スライド番号）, showPlaceholder, hideTextOf,
+ *   objectStyle(o) → { hidden, alpha, dx, dy, scale, clip }（アニメーション用）
  */
 export function drawSlide(ctx, slide, width, height, opts = {}) {
+  const pres = opts.pres || { width: SLIDE_W, height: SLIDE_H, theme: 'office' };
+  const theme = findTheme(pres.theme);
+  const W = pres.width, H = pres.height;
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-  ctx.scale(width / SLIDE_W, height / SLIDE_H);
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, SLIDE_W, SLIDE_H);
+  ctx.scale(width / W, height / H);
+  ctx.fillStyle = resolveColor(slide.background || '@bg1', theme);
+  ctx.fillRect(0, 0, W, H);
   ctx.beginPath();
-  ctx.rect(0, 0, SLIDE_W, SLIDE_H);
+  ctx.rect(0, 0, W, H);
   ctx.clip();
+  const pixelScale = width / W;
   for (const o of slide.objects) {
-    drawObject(ctx, o, { showPlaceholder: opts.showPlaceholder, hideText: o.id === opts.hideTextOf });
-    if (opts.showPlaceholder && o.type === 'text' && !o.text && !o.stroke) {
+    if (o.hidden && !opts.showHidden) continue;
+    const st = opts.objectStyle ? opts.objectStyle(o) : null;
+    if (st?.hidden) continue;
+    ctx.save();
+    if (st) {
+      if (st.alpha !== undefined) ctx.globalAlpha = st.alpha;
+      if (st.dx || st.dy) ctx.translate(st.dx || 0, st.dy || 0);
+      if (st.scale !== undefined && st.scale !== 1) {
+        const cx = o.x + o.w / 2, cy = o.y + o.h / 2;
+        ctx.translate(cx, cy); ctx.scale(st.scale, st.scale); ctx.translate(-cx, -cy);
+      }
+      if (st.clip) { ctx.beginPath(); ctx.rect(st.clip.x, st.clip.y, st.clip.w, st.clip.h); ctx.clip(); }
+    }
+    drawObject(ctx, o, { theme, showPlaceholder: opts.showPlaceholder, hideText: o.id === opts.hideTextOf, pixelScale });
+    ctx.restore();
+    if (opts.showPlaceholder && o.type === 'text' && !o.stroke && o.paragraphs.every((p) => p.runs.every((r) => !r.text))) {
       // 空のテキスト ボックスは枠を点線で表示（PowerPoint の編集画面と同様）
       ctx.save();
       ctx.translate(o.x + o.w / 2, o.y + o.h / 2);
       ctx.rotate((o.rotation * Math.PI) / 180);
       ctx.setLineDash([4, 3]);
-      ctx.strokeStyle = '#bfbfbf';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = '#BFBFBF';
+      ctx.lineWidth = 1 / pixelScale;
       ctx.strokeRect(-o.w / 2, -o.h / 2, o.w, o.h);
       ctx.restore();
     }
   }
+  if (opts.pres) drawHeaderFooter(ctx, pres, slide, opts.index ?? 0, theme);
   ctx.restore();
 }
 
-/** 選択枠とハンドルを描画（編集画面のオーバーレイ用） */
-export function drawSelection(ctx, slide, selection, width, height, editingId) {
+/** 選択枠とハンドル（編集画面のオーバーレイ）。opts: editingId, grid, guides, size */
+export function drawSelection(ctx, slide, selection, width, height, opts = {}) {
+  const size = opts.size || { width: SLIDE_W, height: SLIDE_H };
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-  const sx = width / SLIDE_W, sy = height / SLIDE_H;
+  const sx = width / size.width, sy = height / size.height;
+  if (opts.grid) {
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    const step = opts.grid;
+    for (let x = step; x < size.width; x += step) for (let y = step; y < size.height; y += step) ctx.fillRect(x * sx, y * sy, 1, 1);
+  }
+  if (opts.guides) {
+    ctx.strokeStyle = 'rgba(128,128,128,0.8)';
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo((size.width / 2) * sx, 0); ctx.lineTo((size.width / 2) * sx, height);
+    ctx.moveTo(0, (size.height / 2) * sy); ctx.lineTo(width, (size.height / 2) * sy);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
   const sel = slide.objects.filter((o) => selection.includes(o.id));
   const groups = new Map();
   for (const o of sel) {
@@ -192,11 +301,16 @@ export function drawSelection(ctx, slide, selection, width, height, editingId) {
     ctx.translate((o.x + o.w / 2) * sx, (o.y + o.h / 2) * sy);
     ctx.rotate((o.rotation * Math.PI) / 180);
     const w = o.w * sx, h = o.h * sy;
-    ctx.strokeStyle = o.id === editingId ? '#2b579a' : '#5b9bd5';
+    ctx.strokeStyle = o.id === opts.editingId ? '#2B579A' : '#5B9BD5';
     ctx.lineWidth = 1;
-    ctx.setLineDash(o.id === editingId ? [5, 3] : []);
-    ctx.strokeRect(-w / 2, -h / 2, w, h);
-    if (!o.groupId) drawHandles(ctx, -w / 2, -h / 2, w, h);
+    ctx.setLineDash(o.id === opts.editingId ? [5, 3] : []);
+    if (isLine(o)) {
+      const fy = o.flipV ? -1 : 1, fx = o.flipH ? -1 : 1;
+      if (!o.groupId) drawHandlePoints(ctx, [[(-w / 2) * fx, (-h / 2) * fy], [(w / 2) * fx, (h / 2) * fy]]);
+    } else {
+      ctx.strokeRect(-w / 2, -h / 2, w, h);
+      if (!o.groupId) drawHandles(ctx, -w / 2, -h / 2, w, h);
+    }
     ctx.restore();
     if (o.groupId) {
       if (!groups.has(o.groupId)) groups.set(o.groupId, []);
@@ -205,7 +319,7 @@ export function drawSelection(ctx, slide, selection, width, height, editingId) {
   }
   for (const objs of groups.values()) {
     const b = bounds(objs);
-    ctx.strokeStyle = '#7f7f7f';
+    ctx.strokeStyle = '#7F7F7F';
     ctx.setLineDash([6, 3]);
     ctx.strokeRect(b.x * sx - 4, b.y * sy - 4, b.w * sx + 8, b.h * sy + 8);
     ctx.setLineDash([]);
@@ -214,15 +328,10 @@ export function drawSelection(ctx, slide, selection, width, height, editingId) {
   ctx.restore();
 }
 
-function drawHandles(ctx, x, y, w, h) {
+function drawHandlePoints(ctx, pts) {
   ctx.setLineDash([]);
-  ctx.fillStyle = '#ffffff';
-  ctx.strokeStyle = '#5b9bd5';
-  const pts = [
-    [x, y], [x + w / 2, y], [x + w, y],
-    [x, y + h / 2], [x + w, y + h / 2],
-    [x, y + h], [x + w / 2, y + h], [x + w, y + h],
-  ];
+  ctx.fillStyle = '#FFFFFF';
+  ctx.strokeStyle = '#5B9BD5';
   for (const [px, py] of pts) {
     ctx.beginPath();
     ctx.arc(px, py, 4, 0, Math.PI * 2);
@@ -231,11 +340,23 @@ function drawHandles(ctx, x, y, w, h) {
   }
 }
 
+function drawHandles(ctx, x, y, w, h) {
+  drawHandlePoints(ctx, [
+    [x, y], [x + w / 2, y], [x + w, y],
+    [x, y + h / 2], [x + w, y + h / 2],
+    [x, y + h], [x + w / 2, y + h], [x + w, y + h],
+  ]);
+  // 回転ハンドル
+  ctx.beginPath();
+  ctx.arc(x + w / 2, y - 18, 5, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
 /** スライドを画像（dataURL）に変換 */
-export function slideToDataUrl(slide, width = SLIDE_W, height = SLIDE_H) {
+export function slideToDataUrl(pres, slide, width, height, index = 0) {
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
-  drawSlide(canvas.getContext('2d'), slide, width, height);
+  drawSlide(canvas.getContext('2d'), slide, width, height, { pres, index });
   return canvas.toDataURL('image/png');
 }

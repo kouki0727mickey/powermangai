@@ -1,6 +1,6 @@
 // 作成したスライドと完成形（お手本）の比較・採点
-import { SHAPE_LABELS, hasText } from './model.js';
-import { colorName, sameColor } from './colors.js';
+import { SHAPE_LABELS, hasText, objText, objFont, objAlign } from './model.js';
+import { colorName, resolveColor, findTheme } from './colors.js';
 
 export const POS_TOLERANCE = 10;
 export const SIZE_TOLERANCE = 10;
@@ -8,16 +8,24 @@ export const ROT_TOLERANCE = 3;
 
 const normText = (t) => String(t ?? '').replace(/\r/g, '').replace(/[ \t　]+/g, ' ').trim();
 
+// 比較中のテーマ（お手本側 / 作成側）。色は各プレゼンテーションのテーマで解決して比較する
+let TH_T = findTheme('office');
+let TH_U = findTheme('office');
+const sameColorTU = (t, u) => (!t || !u ? !t && !u : resolveColor(t, TH_T) === resolveColor(u, TH_U));
+const nameT = (c) => colorName(c, TH_T);
+const nameU = (c) => colorName(c, TH_U);
+const textOf = (o) => (hasText(o) ? objText(o) : '');
+
 function describe(o) {
   const label = SHAPE_LABELS[o.type] || o.type;
-  const text = normText(o.text);
+  const text = normText(textOf(o));
   return text ? `${label}「${text.length > 12 ? `${text.slice(0, 12)}…` : text}」` : label;
 }
 
 function matchCost(t, u) {
   let cost = 0;
   if (t.type !== u.type) cost += 1000;
-  if (normText(t.text) !== normText(u.text)) cost += normText(t.text) && normText(u.text) ? 300 : 500;
+  if (normText(textOf(t)) !== normText(textOf(u))) cost += normText(textOf(t)) && normText(textOf(u)) ? 300 : 500;
   const dx = t.x + t.w / 2 - (u.x + u.w / 2);
   const dy = t.y + t.h / 2 - (u.y + u.h / 2);
   cost += Math.hypot(dx, dy) / 4;
@@ -47,15 +55,17 @@ function checkObject(t, u) {
   const name = describe(t);
   const add = (ok, message, hint) => checks.push({ ok, message: `${name}: ${message}`, hint });
 
-  if (hasText(t) && (normText(t.text) || normText(u.text))) {
-    add(normText(t.text) === normText(u.text),
-      normText(t.text) === normText(u.text) ? '文字 OK' : `文字が違います（「${normText(u.text)}」→「${normText(t.text)}」）`,
+  const tt = normText(textOf(t)), ut = normText(textOf(u));
+  if (hasText(t) && (tt || ut)) {
+    add(tt === ut, tt === ut ? '文字 OK' : `文字が違います（「${ut}」→「${tt}」）`,
       'Enter / F2 で編集、Esc で終了');
   }
   const posOk = Math.abs(t.x - u.x) <= POS_TOLERANCE && Math.abs(t.y - u.y) <= POS_TOLERANCE;
   add(posOk, posOk ? '位置 OK' : `位置が違います（x ${Math.round(u.x)}→${t.x}, y ${Math.round(u.y)}→${t.y}）`,
     '矢印キーで移動（Ctrl+矢印で微調整）、Alt → H → G → A で配置');
-  const sizeOk = Math.abs(t.w - u.w) <= SIZE_TOLERANCE && Math.abs(t.h - u.h) <= SIZE_TOLERANCE;
+  // 「テキストに合わせて図形のサイズを調整」の高さは文字量で決まるので比較しない
+  const autoH = t.autoFit === 'shape' && u.autoFit === 'shape';
+  const sizeOk = Math.abs(t.w - u.w) <= SIZE_TOLERANCE && (autoH || Math.abs(t.h - u.h) <= SIZE_TOLERANCE);
   add(sizeOk, sizeOk ? 'サイズ OK' : `サイズが違います（幅 ${Math.round(u.w)}→${t.w}, 高さ ${Math.round(u.h)}→${t.h}）`,
     'Shift+矢印でサイズ変更、Alt → J → D → W / H で数値指定');
   if (t.rotation || u.rotation) {
@@ -64,23 +74,24 @@ function checkObject(t, u) {
     add(ok, ok ? '回転 OK' : `回転が違います（${u.rotation}°→${t.rotation}°）`, 'Alt+← / → で 15° 回転、Alt → H → G → O で 90°');
   }
   if ((t.type !== 'line' && t.type !== 'text') || t.fill || u.fill) {
-    const ok = sameColor(t.fill, u.fill);
-    add(ok, ok ? '塗りつぶし OK' : `塗りつぶしが違います（${colorName(u.fill)}→${colorName(t.fill)}）`, 'Alt → H → S → F');
+    const ok = sameColorTU(t.fill, u.fill);
+    add(ok, ok ? '塗りつぶし OK' : `塗りつぶしが違います（${nameU(u.fill)}→${nameT(t.fill)}）`, 'Alt → H → S → F');
   }
   if (t.type === 'line' || t.stroke || u.stroke) {
-    const ok = sameColor(t.stroke, u.stroke);
-    add(ok, ok ? '枠線 OK' : `枠線の色が違います（${colorName(u.stroke)}→${colorName(t.stroke)}）`, 'Alt → H → S → O');
+    const ok = sameColorTU(t.stroke, u.stroke);
+    add(ok, ok ? '枠線 OK' : `枠線の色が違います（${nameU(u.stroke)}→${nameT(t.stroke)}）`, 'Alt → H → S → O');
   }
-  if (hasText(t) && normText(t.text)) {
-    const f = t.font, g = u.font;
+  if (hasText(t) && tt) {
+    const f = objFont(t), g = objFont(u);
     const sizeOkF = Math.abs(f.size - g.size) < 0.5;
     add(sizeOkF, sizeOkF ? 'フォント サイズ OK' : `フォント サイズが違います（${g.size}→${f.size}）`, 'Ctrl+Shift+> / < 、Alt → H → F → S');
     add(f.bold === g.bold, f.bold === g.bold ? '太字 OK' : `太字を${f.bold ? '設定' : '解除'}してください`, 'Ctrl+B');
     add(f.italic === g.italic, f.italic === g.italic ? '斜体 OK' : `斜体を${f.italic ? '設定' : '解除'}してください`, 'Ctrl+I');
     add(f.underline === g.underline, f.underline === g.underline ? '下線 OK' : `下線を${f.underline ? '設定' : '解除'}してください`, 'Ctrl+U');
-    add(sameColor(f.color, g.color), sameColor(f.color, g.color) ? '文字の色 OK' : `文字の色が違います（${colorName(g.color)}→${colorName(f.color)}）`, 'Alt → H → F → C');
+    add(sameColorTU(f.color, g.color), sameColorTU(f.color, g.color) ? '文字の色 OK' : `文字の色が違います（${nameU(g.color)}→${nameT(f.color)}）`, 'Alt → H → F → C');
     const alignNames = { left: '左揃え', center: '中央揃え', right: '右揃え', justify: '両端揃え' };
-    add(t.align === u.align, t.align === u.align ? '文字の配置 OK' : `文字の配置が違います（${alignNames[u.align]}→${alignNames[t.align]}）`, 'Ctrl+L / E / R / J');
+    const ta = objAlign(t), ua = objAlign(u);
+    add(ta === ua, ta === ua ? '文字の配置 OK' : `文字の配置が違います（${alignNames[ua]}→${alignNames[ta]}）`, 'Ctrl+L / E / R / J');
   }
   return checks;
 }
@@ -95,7 +106,7 @@ function compareSlide(target, user, slideNo) {
   const tObjs = target.objects;
   const uObjs = user ? user.objects : [];
   // 空のプレースホルダーは採点対象外（PowerPoint でもスライドショーでは表示されない）
-  const isEmptyPlaceholder = (o) => o.type === 'text' && !normText(o.text) && !o.fill && !o.stroke;
+  const isEmptyPlaceholder = (o) => o.type === 'text' && !normText(textOf(o)) && !o.fill && !o.stroke;
   const tList = tObjs.filter((o) => !isEmptyPlaceholder(o));
   const uList = uObjs.filter((o) => !isEmptyPlaceholder(o));
   const map = matchObjects(tList, uList);
@@ -158,6 +169,8 @@ function insertHint(t) {
  * 採点。戻り値: { score: 0-100, passed, total, checks: [{ ok, message, hint, weight }] }
  */
 export function scorePresentation(user, target) {
+  TH_T = findTheme(target.theme);
+  TH_U = findTheme(user.theme);
   const checks = [];
   const n = Math.max(target.slides.length, user.slides.length);
   for (let i = 0; i < n; i++) {

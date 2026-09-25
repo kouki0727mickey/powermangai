@@ -65,7 +65,7 @@ test('テキスト編集中は通常の文字入力を奪わない', () => {
   assert.equal(action(ev('Enter', 'Enter'), 'text'), null);
   assert.equal(action(ev('Backspace', 'Backspace'), 'text'), null);
   assert.equal(action(ev('a', 'KeyA', { ctrlKey: true }), 'text'), null, 'Ctrl+A はテキスト全選択に任せる');
-  assert.equal(action(ev('z', 'KeyZ', { ctrlKey: true }), 'text'), null, 'Ctrl+Z はテキスト Undo に任せる');
+  assert.equal(action(ev('z', 'KeyZ', { ctrlKey: true }), 'text'), 'textUndo', 'Ctrl+Z は入力中の Undo');
 });
 
 test('Shift+Tab と Tab、Ctrl+Shift+矢印の区別', () => {

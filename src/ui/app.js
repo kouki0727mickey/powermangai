@@ -1,24 +1,28 @@
 // アプリ本体: キー入力の振り分け、画面描画、練習モード
-import { Editor, nextCase } from '../core/editor.js';
-import { SLIDE_W, SLIDE_H, SHAPE_TYPES, SHAPE_LABELS, createPresentation, createSlide, normalizePresentation, hasText } from '../core/model.js';
+import { Editor } from '../core/editor.js';
+import {
+  SHAPE_TYPES, SHAPE_LABELS, LAYOUTS, createPresentation, createSlide, normalizePresentation, hasText, objFont, objText,
+} from '../core/model.js';
+import { findTheme } from '../core/colors.js';
 import { keyCandidates, findBinding, prettyKey, MODIFIER_KEYS } from '../core/keys.js';
 import { BINDINGS, MOVE_STEP, bindingsByCategory } from '../core/shortcuts.js';
 import { KeyTipSession, KEYTIPS, keyTipPaths } from '../core/keytips.js';
 import { CHALLENGES } from '../core/challenges.js';
 import { scorePresentation, imageSimilarity } from '../core/scoring.js';
-import { wrapText } from '../core/textlayout.js';
-import { drawSlide, drawSelection, slideToDataUrl, fontCss, TEXT_INSET } from './render.js';
+import { drawSlide, drawSelection, slideToDataUrl, measureText, setImageLoadCallback } from './render.js';
+import { RichEditor } from './richeditor.js';
 import {
   activeDialog, openPalette, openShapeGallery, openGallery, openInput, openList, openConfirm,
   openContent, openHelp, openFontDialog, h,
 } from './dialogs.js';
 import { openPresentationFile, savePresentationFile, openImageFile, setFullScreen } from './platform.js';
 
-const FONT_FAMILIES = ['Yu Gothic UI', '游ゴシック', 'メイリオ', 'MS ゴシック', 'MS 明朝', 'BIZ UDPゴシック', 'Arial', 'Segoe UI', 'Times New Roman', 'Consolas'];
+const FONT_FAMILIES = ['+major', '+minor', 'Yu Gothic UI', '游ゴシック', 'メイリオ', 'MS ゴシック', 'MS 明朝', 'BIZ UDPゴシック', 'Arial', 'Segoe UI', 'Times New Roman', 'Consolas'];
+const LINE_SPACINGS = [1, 1.5, 2, 2.5, 3];
 const $ = (id) => document.getElementById(id);
 
 // ------------------------------------------------------------------ 状態
-const editor = new Editor(createPresentation());
+const editor = new Editor(createPresentation(), { measure: measureText });
 const app = {
   filePath: null,
   savedJson: JSON.stringify(editor.pres),
@@ -83,15 +87,17 @@ function eventKeyText(e) {
 // ------------------------------------------------------------------ 描画
 const mainCanvas = $('slide-canvas');
 const overlay = $('overlay-canvas');
-const textEditor = $('text-editor');
+const rich = new RichEditor($('text-box'), $('text-editor'));
+rich.onChange = (paras) => editor.previewEdit(paras);
 
 function layout() {
   const stage = $('stage');
+  const { width: SW, height: SH } = editor.size;
   const availW = stage.clientWidth - 32;
   const availH = stage.clientHeight - 32;
-  const scale = Math.max(0.1, Math.min(availW / SLIDE_W, availH / SLIDE_H));
+  const scale = Math.max(0.1, Math.min(availW / SW, availH / SH));
   app.scale = scale;
-  const w = Math.round(SLIDE_W * scale), hgt = Math.round(SLIDE_H * scale);
+  const w = Math.round(SW * scale), hgt = Math.round(SH * scale);
   const dpr = window.devicePixelRatio || 1;
   const wrap = $('canvas-wrap');
   wrap.style.width = `${w}px`;
@@ -105,10 +111,15 @@ function layout() {
   render();
 }
 
+let lastSize = '';
 function render() {
+  const size = `${editor.pres.width}x${editor.pres.height}`;
+  if (size !== lastSize) { lastSize = size; layout(); return; }
   const slide = editor.slide;
-  drawSlide(mainCanvas.getContext('2d'), slide, mainCanvas.width, mainCanvas.height, { showPlaceholder: true, hideTextOf: editor.editingId });
-  drawSelection(overlay.getContext('2d'), slide, editor.selection, overlay.width, overlay.height, editor.editingId);
+  drawSlide(mainCanvas.getContext('2d'), slide, mainCanvas.width, mainCanvas.height, {
+    pres: editor.pres, index: editor.slideIndex, showPlaceholder: true, hideTextOf: editor.editingId,
+  });
+  drawSelection(overlay.getContext('2d'), slide, editor.selection, overlay.width, overlay.height, { editingId: editor.editingId, size: editor.size });
   renderThumbs();
   renderTextEditor();
   renderStatus();
@@ -133,10 +144,12 @@ function renderThumbs() {
     const el = pane.children[i];
     el.classList.toggle('current', i === editor.slideIndex);
     el.querySelector('.num').textContent = String(i + 1);
-    const json = JSON.stringify(s);
+    const json = JSON.stringify(s) + editor.pres.theme + JSON.stringify(editor.pres.headerFooter) + i;
     if (thumbCache[i] !== json) {
       const c = el.querySelector('canvas');
-      drawSlide(c.getContext('2d'), s, c.width, c.height);
+      const hgt = Math.round((c.width * editor.pres.height) / editor.pres.width);
+      if (c.height !== hgt) { c.height = hgt; c.style.height = `${Math.round((150 * editor.pres.height) / editor.pres.width)}px`; }
+      drawSlide(c.getContext('2d'), s, c.width, c.height, { pres: editor.pres, index: i });
       thumbCache[i] = json;
     }
   });
@@ -147,72 +160,34 @@ function renderThumbs() {
 
 function renderTextEditor() {
   const obj = editor.editingId ? editor.findObject(editor.editingId) : null;
-  if (!obj) {
-    // 編集中でなくても textarea はフォーカスを持ち続け、IME の入力を受け取れるようにする（画面外に置く）
-    const st = textEditor.style;
-    st.display = 'block';
-    st.left = '-10000px';
-    st.top = '0px';
-    st.transform = '';
-    focusSink();
-    return;
-  }
-  const s = app.scale;
-  const st = textEditor.style;
-  st.display = 'block';
-  st.left = `${obj.x * s}px`;
-  st.top = `${obj.y * s}px`;
-  st.width = `${obj.w * s}px`;
-  st.height = `${obj.h * s}px`;
-  st.transform = obj.rotation ? `rotate(${obj.rotation}deg)` : '';
-  st.font = fontCss({ ...obj.font, size: obj.font.size * s });
-  st.lineHeight = '1.2';
-  st.color = obj.font.color;
-  st.textAlign = obj.align;
-  st.textDecoration = obj.font.underline ? 'underline' : 'none';
-  st.paddingLeft = st.paddingRight = `${TEXT_INSET * s}px`;
-  st.paddingBottom = '0px';
-  textEditor.placeholder = obj.placeholder || '';
-  updateTextPadding(obj);
+  if (obj && rich.active) rich.position(obj, app.scale);
+  focusSink();
 }
 
-/** 図形の文字は上下中央に表示するため、行数から上余白を計算する */
-function updateTextPadding(obj) {
-  const s = app.scale;
-  let top = TEXT_INSET;
-  if (obj.type !== 'text') {
-    const ctx = mainCanvas.getContext('2d');
-    ctx.save();
-    ctx.font = fontCss(obj.font);
-    const lines = wrapText(textEditor.value || ' ', Math.max(1, obj.w - TEXT_INSET * 2), (t) => ctx.measureText(t).width);
-    ctx.restore();
-    top = Math.max(0, (obj.h - lines.length * obj.font.size * 1.2) / 2);
-  }
-  textEditor.style.paddingTop = `${top * s}px`;
-}
-/** ダイアログやスライドショーが無いときは常に textarea にフォーカスを置く */
+/** ダイアログやスライドショーが無いときは常に編集用要素にフォーカスを置く（IME の入力を受け取るため） */
 function focusSink() {
   if (activeDialog() || app.show) return;
-  if (document.activeElement !== textEditor) textEditor.focus({ preventScroll: true });
+  if (document.activeElement !== rich.el) rich.el.focus({ preventScroll: true });
 }
 
-/** 図形を選択した状態で文字（IME 変換を含む）を入力したら、その図形の文字を置き換えて編集を始める */
-function startEditFromTyping() {
-  if (editor.editingId) return true;
-  if (editor.pane !== 'editor' || !editor.canEdit() || app.keytips) return false;
-  editor.startEdit(); // textarea の内容（入力された文字）はそのまま使う
-  return true;
-}
-
-textEditor.addEventListener('compositionstart', () => { startEditFromTyping(); });
-textEditor.addEventListener('input', () => {
-  if (!editor.editingId && !startEditFromTyping()) {
-    logKey(textEditor.value || '文字', editor.selection.length ? 'この図形には文字を入力できません' : '図形が選択されていません（Tab で選択）', true);
-    textEditor.value = '';
-    return;
-  }
-  const obj = editor.findObject(editor.editingId);
-  if (obj) updateTextPadding(obj);
+// 図形を選択した状態で IME の変換を始めたら、その図形の文字を置き換えて編集を始める
+rich.el.addEventListener('compositionstart', () => {
+  if (editor.editingId || editor.pane !== 'editor' || !editor.canEdit() || app.keytips) return;
+  editor.startEdit();
+  rich.beginFromTyping(editor.findObject(editor.editingId), editor.theme, app.scale);
+});
+// キー操作を伴わない文字の入力（音声入力・一部の入力方式）でも同様に編集を始める
+rich.el.addEventListener('beforeinput', (e) => {
+  if (rich.active || rich.composing || !e.inputType.startsWith('insert')) return;
+  if (editor.editingId || editor.pane !== 'editor' || !editor.canEdit() || app.keytips) return;
+  editor.startEdit();
+  rich.beginFromTyping(editor.findObject(editor.editingId), editor.theme, app.scale);
+});
+rich.el.addEventListener('input', () => {
+  if (rich.active || rich.composing) return;
+  // 編集できない状態で入力された文字（IME の確定など）は捨てる
+  logKey('文字', editor.selection.length ? 'この図形には文字を入力できません' : '図形が選択されていません（Tab で選択）', true);
+  rich.resetSink();
 });
 
 function renderStatus() {
@@ -298,26 +273,49 @@ function renderKeytips() {
 }
 
 // ------------------------------------------------------------------ テキスト編集
-function beginEdit({ clear = false } = {}) {
+function beginEdit({ clear = false, select = 'end' } = {}) {
   if (!editor.startEdit()) return false;
-  const obj = editor.findObject(editor.editingId);
-  textEditor.value = clear ? '' : obj.text;
+  rich.begin(editor.findObject(editor.editingId), editor.theme, app.scale, { clear, select });
   render();
-  focusSink();
-  const end = textEditor.value.length;
-  textEditor.setSelectionRange(end, end);
   return true;
 }
 
 function commitEdit() {
   if (!editor.editingId) return;
-  const text = textEditor.value;
-  textEditor.value = '';
-  editor.endEdit(text);
+  const paras = rich.active ? rich.end() : null;
+  editor.endEdit(paras ?? undefined);
 }
 
-// 編集を続けたまま実行できる（図形単位の書式）アクション
-const TEXT_KEEP = new Set(['bold', 'italic', 'underline', 'fontGrow', 'fontShrink', 'clearFormat', 'alignLeft', 'alignCenter', 'alignRight', 'alignJustify', 'changeCase', 'fontDialog', 'help', 'toggleTarget', 'input:fontSize', 'input:fontFamily', 'palette:fontColor']);
+/** 書式の操作: 文字の編集中は選択した文字に、図形を選択中は図形内のすべての文字に適用 */
+const fmt = (textFn, objFn) => (args) => {
+  if (editor.editingId && rich.active) return textFn(args);
+  if (!editor.selection.length) return needSelection();
+  return objFn(args) || (setStatus('文字を含む図形を選択してください'), false);
+};
+
+/** ダイアログを開く前に編集中の選択範囲を保存し、閉じた後に戻す */
+async function keepTextSelection(fn) {
+  const saved = editor.editingId && rich.active ? rich.getSel() : null;
+  const r = await fn();
+  if (saved && rich.active) { focusSink(); rich.setSel(saved.anchor, saved.focus); }
+  return r;
+}
+
+/** 現在の文字の書式（編集中はカーソル位置、図形選択中は先頭の文字） */
+function currentFont() {
+  if (editor.editingId && rich.active) return rich.currentFont();
+  const o = editor.selectedObjects().find(hasText);
+  return o ? objFont(o) : null;
+}
+
+// 編集を続けたまま実行できるアクション
+const TEXT_KEEP = new Set([
+  'bold', 'italic', 'underline', 'strike', 'subscript', 'superscript', 'fontGrow', 'fontShrink', 'clearFormat',
+  'alignLeft', 'alignCenter', 'alignRight', 'alignJustify', 'changeCase', 'fontDialog', 'help', 'toggleTarget', 'toggleHints',
+  'input:fontSize', 'input:fontFamily', 'palette:fontColor', 'bullets', 'numbering', 'demote', 'promote',
+  'lineSpacing1', 'lineSpacing15', 'lineSpacing2', 'gallery:lineSpacing', 'moveParaUp', 'moveParaDown',
+  'textUndo', 'textRedo', 'copyFormat', 'pasteFormat', 'textAnchor', 'save', 'saveAs',
+]);
 
 // ------------------------------------------------------------------ アクション
 const needSelection = () => { setStatus('図形が選択されていません（Tab で選択）'); return false; };
@@ -395,37 +393,48 @@ const ACTIONS = {
     const r = editor.nextPlaceholder();
     if (r === 'newSlide') setStatus('新しいスライドを追加しました');
   },
-  bold: () => editor.toggleFont('bold') || needSelection(),
-  italic: () => editor.toggleFont('italic') || needSelection(),
-  underline: () => editor.toggleFont('underline') || needSelection(),
-  fontGrow: sel(() => editor.changeFontSize(1)),
-  fontShrink: sel(() => editor.changeFontSize(-1)),
-  clearFormat: sel(() => editor.clearCharFormat()),
-  changeCase: () => {
-    if (editor.editingId) {
-      const { selectionStart: a, selectionEnd: b, value } = textEditor;
-      if (a === b) textEditor.value = nextCase(value);
-      else textEditor.value = value.slice(0, a) + nextCase(value.slice(a, b)) + value.slice(b);
-      textEditor.setSelectionRange(a, b);
-      return true;
-    }
-    return editor.changeCase() || needSelection();
-  },
-  alignLeft: sel(() => editor.setAlign('left')),
-  alignCenter: sel(() => editor.setAlign('center')),
-  alignRight: sel(() => editor.setAlign('right')),
-  alignJustify: sel(() => editor.setAlign('justify')),
-  copyFormat: () => (editor.copyFormat() ? setStatus('書式をコピーしました（Ctrl+Shift+V で貼り付け）') : needSelection()),
-  pasteFormat: () => (editor.formatClipboard ? (editor.pasteFormat() || needSelection()) : (setStatus('書式がコピーされていません（Ctrl+Shift+C）'), false)),
-  fontDialog: sel(async () => {
-    const o = editor.selectedObjects().find(hasText);
-    if (!o) return needSelection();
-    const r = await openFontDialog(o.font, FONT_FAMILIES);
-    if (!r) return;
-    editor.mutate(() => {
-      for (const obj of editor.selectedObjects()) if (hasText(obj)) Object.assign(obj.font, r);
-    });
-  }),
+  bold: fmt(() => rich.toggleFont('bold'), () => editor.toggleFont('bold')),
+  italic: fmt(() => rich.toggleFont('italic'), () => editor.toggleFont('italic')),
+  underline: fmt(() => rich.toggleFont('underline'), () => editor.toggleFont('underline')),
+  strike: fmt(() => rich.toggleFont('strike'), () => editor.toggleFont('strike')),
+  subscript: fmt(() => rich.toggleBaseline('sub'), () => editor.toggleBaseline('sub')),
+  superscript: fmt(() => rich.toggleBaseline('super'), () => editor.toggleBaseline('super')),
+  fontGrow: fmt(() => rich.changeFontSize(1), () => editor.changeFontSize(1)),
+  fontShrink: fmt(() => rich.changeFontSize(-1), () => editor.changeFontSize(-1)),
+  clearFormat: fmt(() => rich.clearFormat(), () => editor.clearCharFormat()),
+  changeCase: fmt(() => rich.changeCase(), () => editor.changeCase()),
+  alignLeft: fmt(() => rich.setParaProp('align', 'left'), () => editor.setAlign('left')),
+  alignCenter: fmt(() => rich.setParaProp('align', 'center'), () => editor.setAlign('center')),
+  alignRight: fmt(() => rich.setParaProp('align', 'right'), () => editor.setAlign('right')),
+  alignJustify: fmt(() => rich.setParaProp('align', 'justify'), () => editor.setAlign('justify')),
+  bullets: fmt(() => rich.toggleBullet('bullet'), () => editor.toggleBullet('bullet')),
+  numbering: fmt(() => rich.toggleBullet('number'), () => editor.toggleBullet('number')),
+  demote: fmt(() => rich.changeLevel(1), () => editor.changeLevel(1)),
+  promote: fmt(() => rich.changeLevel(-1), () => editor.changeLevel(-1)),
+  moveParaUp: fmt(() => rich.moveParagraphs(-1), () => false),
+  moveParaDown: fmt(() => rich.moveParagraphs(1), () => false),
+  lineSpacing1: fmt(() => rich.setParaProp('lineSpacing', 1), () => editor.setParagraphProp('lineSpacing', 1)),
+  lineSpacing15: fmt(() => rich.setParaProp('lineSpacing', 1.5), () => editor.setParagraphProp('lineSpacing', 1.5)),
+  lineSpacing2: fmt(() => rich.setParaProp('lineSpacing', 2), () => editor.setParagraphProp('lineSpacing', 2)),
+  'gallery:lineSpacing': fmt(
+    () => keepTextSelection(async () => { const v = await chooseLineSpacing(); if (v) rich.setParaProp('lineSpacing', v); }),
+    async () => { const v = await chooseLineSpacing(); if (v) editor.setParagraphProp('lineSpacing', v); return true; },
+  ),
+  textAnchor: (v) => (editor.editingId || editor.selection.length ? editor.setObjectProp('anchor', v, hasText) || needSelection() : needSelection()),
+  textUndo: () => rich.undo() || setStatus('入力中の操作で元に戻せるものはありません'),
+  textRedo: () => rich.redo() || setStatus('やり直す操作はありません'),
+  copyFormat: fmt(
+    () => { rich.copyFormat(); setStatus('文字の書式をコピーしました（Ctrl+Shift+V で貼り付け）'); return true; },
+    () => (editor.copyFormat() ? (setStatus('書式をコピーしました（Ctrl+Shift+V で貼り付け）'), true) : false),
+  ),
+  pasteFormat: fmt(
+    () => rich.pasteFormat() || setStatus('書式がコピーされていません（Ctrl+Shift+C）'),
+    () => (editor.formatClipboard ? editor.pasteFormat() : (setStatus('書式がコピーされていません（Ctrl+Shift+C）'), true)),
+  ),
+  fontDialog: fmt(
+    () => keepTextSelection(async () => { const r = await openFontDialog(rich.currentFont(), FONT_FAMILIES, editor.theme); if (r) rich.setFontProps(r); }),
+    async () => { const r = await openFontDialog(currentFont(), FONT_FAMILIES, editor.theme); if (r) editor.setFontProps(r); return true; },
+  ),
 
   // 図形
   moveUp: sel(() => editor.move(0, -MOVE_STEP)),
@@ -489,43 +498,43 @@ const ACTIONS = {
     setStatus(`${SHAPE_LABELS[type]}を挿入しました`);
   },
   'gallery:layout': async () => {
-    const layouts = [['title', 'タイトル スライド'], ['titleContent', 'タイトルとコンテンツ'], ['blank', '白紙']];
-    const items = layouts.map(([value, label]) => {
+    const items = LAYOUTS.map(({ id: value, label }) => {
       const c = document.createElement('canvas');
-      c.width = 80; c.height = 45;
+      c.width = 80; c.height = Math.round((80 * editor.pres.height) / editor.pres.width);
       c.style.border = '1px solid #ccc';
-      drawSlide(c.getContext('2d'), createSlide(value), 80, 45, { showPlaceholder: true });
+      drawSlide(c.getContext('2d'), createSlide(value, editor.size), c.width, c.height, { pres: editor.pres, showPlaceholder: true });
       return { label, value, icon: c };
     });
     const layout = await openGallery('新しいスライド', items, { columns: 3 });
     if (layout) { commitEdit(); editor.newSlide(layout); }
   },
   'palette:fill': sel(async () => {
-    const r = await openPalette('図形の塗りつぶし', { current: editor.selectedObjects()[0].fill });
+    const r = await openPalette('図形の塗りつぶし', { current: editor.selectedObjects()[0].fill, theme: editor.theme });
     if (r) editor.setFill(r.color);
   }),
   'palette:stroke': sel(async () => {
-    const r = await openPalette('図形の枠線', { current: editor.selectedObjects()[0].stroke });
+    const r = await openPalette('図形の枠線', { current: editor.selectedObjects()[0].stroke, theme: editor.theme });
     if (r) editor.setStroke(r.color);
   }),
-  'palette:fontColor': sel(async () => {
-    const r = await openPalette('フォントの色', { current: editor.selectedObjects()[0].font.color, allowNone: false });
-    if (r) editor.setFont('color', r.color);
-  }),
-  'input:fontSize': sel(async () => {
-    const cur = editor.selectedObjects()[0].font.size;
-    const v = await openInput('フォント サイズ', {
-      value: cur,
-      suggestions: ['8', '9', '10', '10.5', '11', '12', '14', '16', '18', '20', '24', '28', '32', '36', '40', '44', '48', '54', '60', '66', '72', '80', '88', '96'],
-      validate: (x) => (Number.isFinite(Number(x)) && Number(x) >= 1 && Number(x) <= 4000 ? null : '1〜4000 の数値を入力してください'),
-    });
-    if (v !== null) editor.setFont('size', Math.round(Number(v) * 2) / 2);
-  }),
-  'input:fontFamily': sel(async () => {
-    const cur = editor.selectedObjects()[0].font.family;
-    const v = await openInput('フォント', { value: cur, suggestions: FONT_FAMILIES, validate: (x) => (x ? null : 'フォント名を入力してください') });
-    if (v !== null) editor.setFont('family', v);
-  }),
+  'palette:fontColor': fmt(
+    () => keepTextSelection(async () => {
+      const r = await openPalette('フォントの色', { current: rich.currentFont().color, allowNone: false, theme: editor.theme });
+      if (r) rich.setFontProp('color', r.color);
+    }),
+    async () => {
+      const r = await openPalette('フォントの色', { current: currentFont()?.color, allowNone: false, theme: editor.theme });
+      if (r) editor.setFont('color', r.color);
+      return true;
+    },
+  ),
+  'input:fontSize': fmt(
+    () => keepTextSelection(async () => { const v = await inputFontSize(); if (v !== null) rich.setFontProp('size', v); }),
+    async () => { const v = await inputFontSize(); if (v !== null) editor.setFont('size', v); return true; },
+  ),
+  'input:fontFamily': fmt(
+    () => keepTextSelection(async () => { const v = await inputFontFamily(); if (v !== null) rich.setFontProp('family', v); }),
+    async () => { const v = await inputFontFamily(); if (v !== null) editor.setFont('family', v); return true; },
+  ),
   'input:width': sel(() => inputDimension('w', '幅')),
   'input:height': sel(() => inputDimension('h', '高さ')),
 
@@ -550,11 +559,30 @@ const REPEATABLE = new Set([
   'rotateBy', 'newSlide', 'reorder', 'arrangeAlign', 'distribute', 'pasteFormat', 'alignLeft', 'alignCenter', 'alignRight', 'alignJustify',
 ]);
 
+async function inputFontSize() {
+  const v = await openInput('フォント サイズ', {
+    value: currentFont()?.size ?? 18,
+    suggestions: ['8', '9', '10', '10.5', '11', '12', '14', '16', '18', '20', '24', '28', '32', '36', '40', '44', '48', '54', '60', '66', '72', '80', '88', '96'],
+    validate: (x) => (Number.isFinite(Number(x)) && Number(x) >= 1 && Number(x) <= 4000 ? null : '1〜4000 の数値を入力してください'),
+  });
+  return v === null ? null : Math.round(Number(v) * 2) / 2;
+}
+
+async function inputFontFamily() {
+  const cur = currentFont()?.family ?? '+minor';
+  const v = await openInput('フォント（+major = 見出しのフォント、+minor = 本文のフォント）', { value: cur, suggestions: FONT_FAMILIES, validate: (x) => (x ? null : 'フォント名を入力してください') });
+  return v;
+}
+
+async function chooseLineSpacing() {
+  return openList('行間', LINE_SPACINGS.map((v) => ({ label: v.toFixed(1), value: v })));
+}
+
 async function inputDimension(prop, label) {
   const cur = Math.round(editor.selectedObjects()[0][prop]);
   const v = await openInput(label, {
     value: cur,
-    label: `${label}（px、スライドは 960 × 540）`,
+    label: `${label}（pt、スライドは ${editor.pres.width} × ${editor.pres.height}）`,
     validate: (x) => (Number.isFinite(Number(x)) && Number(x) >= 0 && Number(x) <= 5000 ? null : '0〜5000 の数値を入力してください'),
   });
   if (v !== null) editor.setDimension(prop, Number(v));
@@ -600,7 +628,7 @@ async function runAction(action, args, { keys = '', label = '', repeat = false }
 
 // ------------------------------------------------------------------ KeyTips
 function startKeytips() {
-  commitEdit();
+  // 文字の編集中もリボンを使えるよう、編集は終了しない（編集を続けられない操作は runAction で確定する）
   app.keytips = new KeyTipSession();
   renderKeytips();
 }
@@ -668,8 +696,9 @@ function renderShow() {
   if (!app.show) return;
   const { index, cover } = app.show;
   const vw = window.innerWidth, vh = window.innerHeight;
-  const scale = Math.min(vw / SLIDE_W, vh / SLIDE_H);
-  const w = Math.round(SLIDE_W * scale), hgt = Math.round(SLIDE_H * scale);
+  const { width: SW, height: SH } = editor.size;
+  const scale = Math.min(vw / SW, vh / SH);
+  const w = Math.round(SW * scale), hgt = Math.round(SH * scale);
   const dpr = window.devicePixelRatio || 1;
   showCanvas.width = Math.round(w * dpr);
   showCanvas.height = Math.round(hgt * dpr);
@@ -684,7 +713,7 @@ function renderShow() {
     ctx.font = `${16 * dpr}px sans-serif`;
     ctx.fillText('スライド ショーの最後です。次へ進むと終了します。', 20 * dpr, 40 * dpr);
   } else {
-    drawSlide(ctx, editor.pres.slides[index], showCanvas.width, showCanvas.height);
+    drawSlide(ctx, editor.pres.slides[index], showCanvas.width, showCanvas.height, { pres: editor.pres, index });
   }
   const cv = $('show-cover');
   cv.className = cover;
@@ -759,7 +788,7 @@ function startChallenge(c) {
   app.practice = newPractice('challenge', {
     challenge: c,
     target,
-    targetImages: target.slides.map((s) => slideToDataUrl(s, 640, 360)),
+    targetImages: target.slides.map((s, i) => slideToDataUrl(target, s, 640, Math.round((640 * target.height) / target.width), i)),
   });
   app.lastRepeat = null;
   render();
@@ -778,7 +807,7 @@ async function loadTargetImage() {
   if (!r) return;
   if (!(await confirmDiscard())) return;
   const pres = createPresentation();
-  pres.slides = [createSlide('blank')];
+  pres.slides = [createSlide('blank', pres)];
   loadPresentation(pres);
   app.practice = newPractice('image', { imageUrl: r.dataUrl, imageName: r.name });
   render();
@@ -855,7 +884,7 @@ async function score() {
     try {
       const img = await loadImage(p.imageUrl);
       const a = pixels((ctx) => ctx.drawImage(img, 0, 0, W, H), W, H);
-      const b = pixels((ctx) => drawSlide(ctx, editor.slide, W, H), W, H);
+      const b = pixels((ctx) => drawSlide(ctx, editor.slide, W, H, { pres: editor.pres, index: editor.slideIndex }), W, H);
       scoreValue = imageSimilarity(a, b);
     } catch (err) {
       await openContent('エラー', h('p', { text: err.message }));
@@ -926,20 +955,24 @@ function onKeyDown(e) {
   }
 
   if (ctx === 'text') {
-    // Tab はフォーカス移動ではなくタブ文字の入力（PowerPoint と同じ）。execCommand なら textarea の Undo も効く
-    if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.metaKey) {
-      e.preventDefault();
-      if (!e.shiftKey && !document.execCommand('insertText', false, '\t')) textEditor.setRangeText('\t', textEditor.selectionStart, textEditor.selectionEnd, 'end');
-    }
-    return; // 文字入力・カーソル移動などは textarea に任せる
+    if (!rich.active || e.ctrlKey || e.metaKey || e.altKey) return; // その他はブラウザの編集操作（単語単位の移動など）に任せる
+    // 段落の分割・結合やレベル変更はモデルで処理する（PowerPoint と同じ動作）
+    if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) rich.softBreak(); else rich.enter(); return; }
+    if (e.key === 'Tab') { e.preventDefault(); rich.tab(e.shiftKey); return; }
+    if (e.key === 'Backspace' && !e.shiftKey && rich.backspaceAtStart()) { e.preventDefault(); return; }
+    if (e.key === 'Delete' && !e.shiftKey && rich.deleteAtEnd()) { e.preventDefault(); return; }
+    return;
   }
 
-  // 図形を選択した状態で文字を入力すると、その図形の文字を置き換えて編集開始（PowerPoint と同じ）。
-  // preventDefault しないので文字は textarea に入り、input イベントで編集が始まる。
+  // 図形を選択した状態で文字を入力すると、その図形の文字を置き換えて編集開始（PowerPoint と同じ）
   const printable = e.key.length === 1;
   if (ctx === 'editor' && printable && !e.ctrlKey && !e.metaKey && !e.altKey) {
-    if (editor.canEdit()) { focusSink(); return; }
     e.preventDefault();
+    if (editor.canEdit()) {
+      beginEdit({ clear: true });
+      rich.insertText(e.key);
+      return;
+    }
     logKey(eventKeyText(e), editor.selection.length ? 'この図形には文字を入力できません' : '図形が選択されていません（Tab で選択）', true);
     return;
   }
@@ -983,6 +1016,7 @@ for (const type of ['mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 
 
 // ------------------------------------------------------------------ 起動
 editor.onChange(() => render());
+setImageLoadCallback(() => { thumbCache = []; render(); });
 renderRibbon();
 layout();
 renderStats();
@@ -1000,4 +1034,4 @@ openContent('PowerMangai へようこそ', h('div', {},
 ));
 
 // テスト・デバッグ用
-globalThis.__pmg = { editor, app, runAction };
+globalThis.__pmg = { editor, app, runAction, rich, text: objText, font: objFont };

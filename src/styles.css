@@ -58,10 +58,16 @@ body.mouse-blocked * { cursor: not-allowed !important; }
 #stage.pane-focus #canvas-wrap { box-shadow: 0 0 0 2px var(--focus), 0 2px 8px rgba(0,0,0,.2); }
 #canvas-wrap { position: relative; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
 #canvas-wrap canvas { position: absolute; left: 0; top: 0; }
+#text-box {
+  position: absolute; display: flex; flex-direction: column; box-sizing: border-box; overflow: visible;
+}
 #text-editor {
-  position: absolute; display: none; margin: 0; border: none; outline: none; resize: none;
-  background: transparent; overflow: hidden; padding: 0; line-height: 1.2; white-space: pre-wrap;
-  word-break: break-all; transform-origin: center center;
+  outline: none; white-space: pre-wrap; overflow-wrap: anywhere; line-break: strict; caret-color: #000;
+  min-height: 1em; user-select: text; cursor: text;
+}
+#text-editor .p { position: relative; margin: 0; }
+#text-editor .p[data-bullet]::before {
+  content: attr(data-bullet); position: absolute; left: var(--bx, 0); pointer-events: none;
 }
 
 #practice {

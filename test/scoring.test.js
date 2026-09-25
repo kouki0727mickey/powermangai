@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { scorePresentation, matchObjects, imageSimilarity } from '../src/core/scoring.js';
 import { CHALLENGES } from '../src/core/challenges.js';
 import { Editor } from '../src/core/editor.js';
-import { createObject, createSlide, clone, SHAPE_TYPES } from '../src/core/model.js';
-import { paletteGrid, adjust, colorName, sameColor } from '../src/core/colors.js';
+import { createObject, createSlide, clone, SHAPE_TYPES, objFont } from '../src/core/model.js';
+import { paletteGrid, adjust, colorName, sameColor, resolveColor } from '../src/core/colors.js';
 import { keyTipPaths } from '../src/core/keytips.js';
 
 const pres = (...slides) => ({ version: 1, slides: slides.map((objects) => ({ id: 's', objects })) });
@@ -28,8 +28,8 @@ test('課題の色はすべてパレットから選べる', () => {
   for (const c of CHALLENGES) {
     for (const s of c.target().slides) {
       for (const o of s.objects) {
-        for (const col of [o.fill, o.font.color]) {
-          if (col && !['#2F528F', '#595959'].includes(col)) assert.ok(colors.has(col), `${c.id}: ${col}`);
+        for (const col of [o.fill, objFont(o).color]) {
+          if (col) assert.ok(colors.has(resolveColor(col)), `${c.id}: ${col}`);
         }
       }
     }

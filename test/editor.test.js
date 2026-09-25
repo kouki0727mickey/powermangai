@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Editor, stepFontSize, nextCase } from '../src/core/editor.js';
-import { createPresentation, createSlide, normalizePresentation, SLIDE_W, SLIDE_H } from '../src/core/model.js';
+import { createPresentation, createSlide, normalizePresentation, SLIDE_W, SLIDE_H, objText, objFont } from '../src/core/model.js';
 
 function blankEditor() {
   const pres = createPresentation();
@@ -96,10 +96,10 @@ test('太字の切り替えは全選択が太字なら解除、それ以外は�
   ed.toggleFont('bold');
   ed.setSelection([a.id, b.id]);
   ed.toggleFont('bold');
-  assert.equal(ed.findObject(a.id).font.bold, true);
-  assert.equal(ed.findObject(b.id).font.bold, true);
+  assert.equal(objFont(ed.findObject(a.id)).bold, true);
+  assert.equal(objFont(ed.findObject(b.id)).bold, true);
   ed.toggleFont('bold');
-  assert.equal(ed.findObject(a.id).font.bold, false);
+  assert.equal(objFont(ed.findObject(a.id)).bold, false);
 });
 
 test('フォントサイズは PowerPoint と同じ段階で増減する', () => {
@@ -233,9 +233,9 @@ test('書式のコピーと貼り付け', () => {
   ed.pasteFormat();
   const ob = ed.findObject(b.id);
   assert.equal(ob.fill, '#FF0000');
-  assert.equal(ob.font.bold, true);
-  assert.equal(ob.font.size, 30);
-  ob.font.size = 12;
+  assert.equal(objFont(ob).bold, true);
+  assert.equal(objFont(ob).size, 30);
+  objFont(ob).size = 12;
   assert.equal(ed.formatClipboard.font.size, 30, '書式クリップボードが共有参照になっていない');
 });
 
@@ -276,9 +276,9 @@ test('テキストの編集と Undo', () => {
   assert.equal(ed.editingId, t.id);
   ed.endEdit('こんにちは');
   assert.equal(ed.editingId, null);
-  assert.equal(ed.findObject(t.id).text, 'こんにちは');
+  assert.equal(objText(ed.findObject(t.id)), 'こんにちは');
   ed.undo();
-  assert.equal(ed.findObject(t.id).text, '');
+  assert.equal(objText(ed.findObject(t.id)), '');
 });
 
 test('直線はテキスト編集できない', () => {
@@ -325,7 +325,7 @@ test('Undo でスライドが減ったとき slideIndex が範囲内に収まる
 
 test('保存データの正規化と検証', () => {
   const pres = normalizePresentation({ slides: [{ objects: [{ type: 'rect', x: 1, y: 2, w: 3, h: 4 }] }] });
-  assert.equal(pres.slides[0].objects[0].fill, '#4472C4');
+  assert.equal(pres.slides[0].objects[0].fill, '@accent1');
   assert.ok(pres.slides[0].id);
   assert.throws(() => normalizePresentation(null));
   assert.throws(() => normalizePresentation({ slides: [{ objects: [{ type: 'bogus' }] }] }));
@@ -337,6 +337,6 @@ test('保存データの正規化と検証', () => {
   assert.throws(() => normalizePresentation(bad({ fill: 123 })), /色が不正/);
   assert.throws(() => normalizePresentation(bad({ align: 'middle' })), /配置/);
   const ok = normalizePresentation(bad({ fill: null, font: { bold: 'yes' }, groupId: 5 }));
-  assert.equal(ok.slides[0].objects[0].font.bold, false);
+  assert.equal(objFont(ok.slides[0].objects[0]).bold, false);
   assert.equal(ok.slides[0].objects[0].groupId, null);
 });

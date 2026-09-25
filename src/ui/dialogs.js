@@ -1,5 +1,5 @@
 // キーボードだけで操作するダイアログ群。すべて Promise を返し、キャンセル時は null。
-import { paletteGrid } from '../core/colors.js';
+import { paletteGrid, resolveColor, DEFAULT_THEME, resolveFontFamily } from '../core/colors.js';
 import { createObject, SHAPE_LABELS } from '../core/model.js';
 import { drawObject } from './render.js';
 import { prettyKey } from '../core/keys.js';
@@ -59,8 +59,8 @@ class Dialog {
 }
 
 // ---------------------------------------------------------------- パレット
-export function openPalette(title, { current = null, allowNone = true } = {}) {
-  const grid = paletteGrid();
+export function openPalette(title, { current = null, allowNone = true, theme = DEFAULT_THEME } = {}) {
+  const grid = paletteGrid(theme);
   const d = new Dialog(title, '矢印キー: 移動 ／ Enter: 決定 ／ N: なし ／ Esc: キャンセル');
   const wrap = h('div', { class: 'palette' });
   const cells = [];
@@ -77,8 +77,10 @@ export function openPalette(title, { current = null, allowNone = true } = {}) {
   // PowerPoint と同じく左上から選び始める。行 grid.length は「なし」
   const NONE = grid.length;
   const pos = { r: 0, c: 0 };
-  const cur = current ? current.toUpperCase() : null;
-  for (const x of cells) if (x.color.hex === cur) x.el.style.boxShadow = 'inset 0 0 0 2px #fff, inset 0 0 0 3px #000';
+  // 現在の色に印を付ける（テーマ参照が一致するもの、なければ見た目の色が同じもの）
+  const curHex = current ? resolveColor(current, theme) : null;
+  const mark = cells.find((x) => x.color.value === current) || cells.find((x) => x.color.hex === curHex);
+  if (mark) mark.el.style.boxShadow = 'inset 0 0 0 2px #fff, inset 0 0 0 3px #000';
   const render = () => {
     for (const x of cells) x.el.classList.toggle('sel', x.r === pos.r && x.col === pos.c);
     if (none) none.classList.toggle('sel', pos.r === NONE);
@@ -90,7 +92,7 @@ export function openPalette(title, { current = null, allowNone = true } = {}) {
       case 'Escape': d.close(null); return true;
       case 'Enter':
       case ' ':
-        d.close({ color: pos.r === NONE ? null : grid[pos.r][pos.c].hex });
+        d.close({ color: pos.r === NONE ? null : grid[pos.r][pos.c].value });
         return true;
       case 'ArrowRight': if (pos.r !== NONE) pos.c = (pos.c + 1) % 10; break;
       case 'ArrowLeft': if (pos.r !== NONE) pos.c = (pos.c + 9) % 10; break;
@@ -154,7 +156,7 @@ export function openGallery(title, items, { columns = 4 } = {}) {
 }
 
 export function openShapeGallery(types) {
-  return openGallery('図形の挿入', types.map((t) => ({ label: SHAPE_LABELS[t], value: t, icon: shapeIcon(t) })));
+  return openGallery('図形の挿入', types.map((t) => ({ label: SHAPE_LABELS[t], value: t, icon: shapeIcon(t) })), { columns: 7 });
 }
 
 // ---------------------------------------------------------------- 入力
@@ -325,11 +327,12 @@ export function openHelp(bindingsByCat, keytipPaths) {
 }
 
 // ---------------------------------------------------------------- フォント ダイアログ
-export function openFontDialog(font, fontFamilies) {
-  const d = new Dialog('フォント', 'Tab / Shift+Tab: 項目の移動 ／ Space: チェック切り替え ／ Alt+↓ または ↑↓: 選択肢 ／ Enter: OK ／ Esc: キャンセル');
+export function openFontDialog(font, fontFamilies, theme = DEFAULT_THEME) {
+  const d = new Dialog('フォント', 'Tab / Shift+Tab: 項目の移動 ／ Space: チェック切り替え ／ ↑↓: 選択肢 ／ Alt+文字: 項目へ移動 ／ Enter: OK ／ Esc: キャンセル');
   const fam = h('select', { id: 'fd-family' });
   const families = fontFamilies.includes(font.family) ? fontFamilies : [font.family, ...fontFamilies];
-  for (const f of families) fam.append(h('option', { value: f, text: f }));
+  const famLabel = (f) => (f === '+major' ? `見出しのフォント（${resolveFontFamily(f, theme)}）` : f === '+minor' ? `本文のフォント（${resolveFontFamily(f, theme)}）` : f);
+  for (const f of families) fam.append(h('option', { value: f, text: famLabel(f) }));
   fam.value = font.family;
   const size = h('input', { type: 'text', id: 'fd-size' });
   size.value = String(font.size);
@@ -337,14 +340,21 @@ export function openFontDialog(font, fontFamilies) {
   const bold = cb('fd-bold', font.bold);
   const italic = cb('fd-italic', font.italic);
   const underline = cb('fd-underline', font.underline);
+  const strike = cb('fd-strike', !!font.strike);
+  const sup = cb('fd-super', font.baseline === 'super');
+  const sub = cb('fd-sub', font.baseline === 'sub');
+  // 上付きと下付きは同時に選べない
+  sup.addEventListener('change', () => { if (sup.checked) sub.checked = false; });
+  sub.addEventListener('change', () => { if (sub.checked) sup.checked = false; });
   const row = (labelText, el, key) => h('div', { class: 'form-row' }, h('label', { for: el.id, text: `${labelText}${key ? ` (${key})` : ''}` }), el);
   d.body.append(
     row('フォント', fam, 'F'), row('サイズ', size, 'S'),
     row('太字', bold, 'B'), row('斜体', italic, 'I'), row('下線', underline, 'U'),
+    row('取り消し線', strike, 'K'), row('上付き', sup, 'P'), row('下付き', sub, 'N'),
   );
   const err = h('div', { style: { color: 'var(--ng)', minHeight: '18px' } });
   d.body.append(err);
-  const fields = [fam, size, bold, italic, underline];
+  const fields = [fam, size, bold, italic, underline, strike, sup, sub];
   d.focus = () => fam.focus();
   d.handleKey = (e) => {
     if (e.isComposing) return false;
@@ -358,18 +368,22 @@ export function openFontDialog(font, fontFamilies) {
     }
     // Alt+文字 で項目へ移動（Windows のダイアログと同じ操作）
     if (e.altKey && !e.ctrlKey) {
-      const map = { f: fam, s: size, b: bold, i: italic, u: underline };
-      const target = map[e.key.toLowerCase()];
+      const map = { f: fam, s: size, b: bold, i: italic, u: underline, k: strike, p: sup, n: sub };
+      const target = map[e.code.replace(/^Key/, '').toLowerCase()];
       if (target) {
         target.focus();
-        if (target.type === 'checkbox') target.checked = !target.checked;
+        if (target.type === 'checkbox') { target.checked = !target.checked; target.dispatchEvent(new Event('change')); }
         return true;
       }
+      return true;
     }
     if (e.key === 'Enter') {
       const s = Number(size.value);
       if (!Number.isFinite(s) || s < 1 || s > 4000) { err.textContent = 'サイズは 1〜4000 の数値で入力してください'; size.focus(); size.select(); return true; }
-      d.close({ family: fam.value, size: Math.round(s * 2) / 2, bold: bold.checked, italic: italic.checked, underline: underline.checked });
+      d.close({
+        family: fam.value, size: Math.round(s * 2) / 2, bold: bold.checked, italic: italic.checked, underline: underline.checked,
+        strike: strike.checked, baseline: sup.checked ? 'super' : sub.checked ? 'sub' : 0,
+      });
       return true;
     }
     return false; // Space でのチェック切り替えや select の矢印操作はブラウザに任せる

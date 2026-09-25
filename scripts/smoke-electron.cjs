@@ -13,7 +13,7 @@ const { _electron } = require('playwright-core');
   await win.keyboard.press('x');
   await win.keyboard.type('Electron OK');
   await win.keyboard.press('Escape');
-  info.text = await win.evaluate(() => __pmg.editor.slide.objects.at(-1).text);
+  info.text = await win.evaluate(() => __pmg.text(__pmg.editor.slide.objects.at(-1)));
   await win.screenshot({ path: process.env.SHOT || 'electron-smoke.png' });
   console.log(JSON.stringify({ ...info, errors }));
   await app.close();

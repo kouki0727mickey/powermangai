@@ -2,21 +2,28 @@
 // 目標値は、既定の挿入位置からショートカットだけで到達できる値にしてある。
 import { createObject, createPresentation, createSlide } from './model.js';
 
-const pres = (slides) => ({ version: 1, width: 960, height: 540, slides });
-const slide = (objects) => ({ id: 's', objects });
+/** プレースホルダーの書式を保ったまま文字を入れる */
+function setPh(obj, text, fontPatch = {}) {
+  for (const p of obj.paragraphs) for (const r of p.runs) Object.assign(r.font, fontPatch);
+  obj.paragraphs[0].runs[0].text = text;
+  return obj;
+}
+
+const pres = (slides) => ({ ...createPresentation(), slides });
+const slide = (objects) => ({ ...createSlide('blank'), objects });
 const o = (type, props) => createObject(type, props);
 
 function titleSlide(title, subtitle) {
   const s = createSlide('title');
-  s.objects[0].text = title;
-  s.objects[1].text = subtitle;
+  setPh(s.objects[0], title);
+  setPh(s.objects[1], subtitle);
   return s;
 }
 
 function contentSlide(title, body) {
   const s = createSlide('titleContent');
-  s.objects[0].text = title;
-  s.objects[1].text = body;
+  setPh(s.objects[0], title);
+  setPh(s.objects[1], body);
   return s;
 }
 
@@ -163,7 +170,7 @@ export const CHALLENGES = [
       const title = titleSlide('社内勉強会', 'ショートカット編');
       const agenda = createSlide('titleContent');
       agenda.objects = [
-        { ...agenda.objects[0], text: 'アジェンダ', font: { ...agenda.objects[0].font, bold: true } },
+        setPh(agenda.objects[0], 'アジェンダ', { bold: true }),
         o('roundRect', { x: 0, y: 210, w: 240, h: 120, text: '基本操作', font: { size: 24 } }),
         o('roundRect', { x: 360, y: 210, w: 240, h: 120, text: '図形', font: { size: 24 } }),
         o('roundRect', { x: 720, y: 210, w: 240, h: 120, text: 'スライド', font: { size: 24 } }),
