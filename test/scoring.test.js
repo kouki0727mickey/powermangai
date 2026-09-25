@@ -207,3 +207,11 @@ test('画像の類似度', () => {
   assert.equal(imageSimilarity(half, black), 50);
   assert.throws(() => imageSimilarity(white, new Uint8ClampedArray(8)));
 });
+
+test('文字のない図形では文字をチェックしない、文字を入れすぎたら NG', () => {
+  const t = pres([createObject('rect')]);
+  const r = scorePresentation(pres([createObject('rect')]), t);
+  assert.ok(!r.checks.some((c) => c.message.includes('文字')));
+  const r2 = scorePresentation(pres([createObject('rect', { text: 'x' })]), t);
+  assert.ok(r2.checks.some((c) => !c.ok && c.message.includes('文字が違います')));
+});

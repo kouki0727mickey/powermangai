@@ -255,3 +255,33 @@ test('不正な URL でも開発サーバーは落ちない', async () => {
   const r2 = await fetch(url);
   assert.equal(r2.status, 200);
 });
+
+test('お手本画像を読み込み（Alt → Y → I）、同じ図形を作ると一致度が上がる', async () => {
+  await fresh();
+  // お手本: 白地の左上に赤い四角形（アプリの描画で作った PNG）
+  const dataUrl = await ed(() => {
+    const c = document.createElement('canvas');
+    c.width = 960; c.height = 540;
+    const x = c.getContext('2d');
+    x.fillStyle = '#fff'; x.fillRect(0, 0, 960, 540);
+    x.fillStyle = '#FF0000'; x.fillRect(0, 0, 160, 120);
+    return c.toDataURL('image/png');
+  });
+  const file = { name: 'target.png', mimeType: 'image/png', buffer: Buffer.from(dataUrl.split(',')[1], 'base64') };
+  const chooser = page.waitForEvent('filechooser');
+  await alt('y', 'i');
+  await (await chooser).setFiles(file);
+  await page.waitForFunction(() => __pmg.app.practice.mode === 'image');
+  assert.equal(await ed(() => __pmg.editor.slide.objects.length), 0, '白紙のスライドから始まる');
+  await keys('F9');
+  const before = Number((await page.textContent('.dialog h2')).match(/([\d.]+)%/)[1]);
+  await keys('Escape');
+  await alt('n', 's', 'h'); await keys('Enter');
+  await alt('h', 's', 'f'); await keys('ArrowUp', 'ArrowUp', 'ArrowRight', 'Enter');
+  await alt('h', 's', 'o'); await keys('n');
+  await alt('h', 'g', 'a', 'l'); await alt('h', 'g', 'a', 't');
+  await keys('F9');
+  const after = Number((await page.textContent('.dialog h2')).match(/([\d.]+)%/)[1]);
+  assert.ok(before < 10, `before=${before}`);
+  assert.ok(after > 95, `after=${after}`);
+});

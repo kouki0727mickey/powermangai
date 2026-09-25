@@ -97,7 +97,7 @@ body.mouse-blocked * { cursor: not-allowed !important; }
 @keyframes fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
 
 #keytips {
-  position: fixed; left: 12px; top: 72px; z-index: 30; min-width: 280px; max-height: calc(100vh - 120px); overflow-y: auto;
+  position: fixed; left: 12px; top: 96px; z-index: 30; min-width: 280px; max-height: calc(100vh - 120px); overflow-y: auto;
   background: #fff; border: 1px solid #8a8a8a; box-shadow: 0 4px 16px rgba(0,0,0,.25); padding: 8px 10px; font-size: 13px;
 }
 #keytips .kt-path { font-weight: bold; color: var(--accent-dark); margin-bottom: 6px; }

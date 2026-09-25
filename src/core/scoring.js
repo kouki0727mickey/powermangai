@@ -47,7 +47,7 @@ function checkObject(t, u) {
   const name = describe(t);
   const add = (ok, message, hint) => checks.push({ ok, message: `${name}: ${message}`, hint });
 
-  if (hasText(t)) {
+  if (hasText(t) && (normText(t.text) || normText(u.text))) {
     add(normText(t.text) === normText(u.text),
       normText(t.text) === normText(u.text) ? '文字 OK' : `文字が違います（「${normText(u.text)}」→「${normText(t.text)}」）`,
       'Enter / F2 で編集、Esc で終了');
