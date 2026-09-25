@@ -1,0 +1,16 @@
+{
+  "name": "powermangai",
+  "version": "0.1.0",
+  "description": "PowerPoint風ショートカット練習デスクトップアプリ",
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "serve": "node scripts/serve.js"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^44.4.5"
+  }
+}
