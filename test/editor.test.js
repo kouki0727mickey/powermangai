@@ -331,4 +331,12 @@ test('保存データの正規化と検証', () => {
   assert.throws(() => normalizePresentation({ slides: [{ objects: [{ type: 'bogus' }] }] }));
   assert.throws(() => normalizePresentation({ slides: [{ objects: [{ type: 'rect', x: 'a' }] }] }));
   assert.equal(normalizePresentation({ slides: [] }).slides.length, 1);
+  const bad = (props) => ({ slides: [{ objects: [{ type: 'rect', ...props }] }] });
+  assert.throws(() => normalizePresentation(bad({ font: { family: 1 } })), /フォント名/);
+  assert.throws(() => normalizePresentation(bad({ font: { color: 'red' } })), /文字の色/);
+  assert.throws(() => normalizePresentation(bad({ fill: 123 })), /色が不正/);
+  assert.throws(() => normalizePresentation(bad({ align: 'middle' })), /配置/);
+  const ok = normalizePresentation(bad({ fill: null, font: { bold: 'yes' }, groupId: 5 }));
+  assert.equal(ok.slides[0].objects[0].font.bold, false);
+  assert.equal(ok.slides[0].objects[0].groupId, null);
 });

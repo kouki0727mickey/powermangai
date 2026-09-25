@@ -32,27 +32,27 @@ export function tokenize(text) {
 export function wrapText(text, maxWidth, measure) {
   const lines = [];
   for (const para of String(text).split('\n')) {
-    if (para === '') { lines.push(''); continue; }
     let line = '';
+    const fits = (str) => measure(str.trimEnd()) <= maxWidth;
     for (const token of tokenize(para)) {
-      const candidate = line + token;
-      if (measure(candidate.trimEnd()) <= maxWidth || line === '') {
-        if (line === '' && measure(token.trimEnd()) > maxWidth && token.length > 1) {
-          // 1 単語が行幅を超える場合は文字単位で分割
-          for (const ch of Array.from(token)) {
-            if (line !== '' && measure((line + ch).trimEnd()) > maxWidth) {
-              lines.push(line.trimEnd());
-              line = ch.trimStart();
-            } else {
-              line += ch;
-            }
-          }
-        } else {
-          line = candidate;
+      if (line === '' || fits(line + token)) {
+        if (line !== '' || fits(token) || token.length === 1) {
+          line += token;
+          continue;
         }
       } else {
         lines.push(line.trimEnd());
-        line = token.trimStart();
+        line = '';
+        if (fits(token) || token.length === 1) { line = token.trimStart(); continue; }
+      }
+      // 1 単語が行幅を超える場合は文字単位で分割（line は空の状態でここに来る）
+      for (const ch of Array.from(token)) {
+        if (line !== '' && !fits(line + ch)) {
+          lines.push(line.trimEnd());
+          line = ch.trimStart();
+        } else {
+          line += ch;
+        }
       }
     }
     lines.push(line.trimEnd());

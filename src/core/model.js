@@ -108,6 +108,9 @@ export function createPresentation() {
   return { version: 1, width: SLIDE_W, height: SLIDE_H, slides: [createSlide('title')] };
 }
 
+const ALIGNS = ['left', 'center', 'right', 'justify'];
+const isColor = (c) => typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c);
+
 /** 保存データを検証し、欠けている値を補ったプレゼンテーションを返す。不正なら例外。 */
 export function normalizePresentation(data) {
   if (!data || typeof data !== 'object' || !Array.isArray(data.slides)) {
@@ -124,9 +127,19 @@ export function normalizePresentation(data) {
         for (const key of ['x', 'y', 'w', 'h', 'rotation', 'strokeWidth']) {
           if (!Number.isFinite(obj[key])) throw new Error(`数値が不正です: ${key}`);
         }
-        if (!Number.isFinite(obj.font.size) || obj.font.size <= 0) throw new Error('フォントサイズが不正です');
+        const f = obj.font;
+        if (!Number.isFinite(f.size) || f.size <= 0) throw new Error('フォントサイズが不正です');
+        if (typeof f.family !== 'string' || !f.family) throw new Error('フォント名が不正です');
+        if (!isColor(f.color)) throw new Error('文字の色が不正です');
+        for (const key of ['fill', 'stroke']) {
+          if (obj[key] !== null && !isColor(obj[key])) throw new Error(`色が不正です: ${key}`);
+        }
+        if (!ALIGNS.includes(obj.align)) throw new Error('文字の配置が不正です');
+        for (const key of ['bold', 'italic', 'underline']) f[key] = f[key] === true;
         obj.text = String(obj.text ?? '');
+        if (obj.placeholder !== undefined) obj.placeholder = String(obj.placeholder);
         if (typeof obj.id !== 'string') obj.id = newId('o');
+        if (obj.groupId !== null && typeof obj.groupId !== 'string') obj.groupId = null;
         return obj;
       }),
     };

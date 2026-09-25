@@ -75,7 +75,10 @@ export function prettyKey(k) {
     ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Escape: 'Esc', Delete: 'Delete',
     Backspace: 'BackSpace', PageUp: 'PageUp', PageDown: 'PageDown', Space: 'Space',
   };
-  return k.split('+').map((p) => names[p] ?? p).join(' + ').replace(/ \+ \+$/, ' + +');
+  // 末尾が「++」のときは + キーそのもの
+  const plusKey = k === '+' || k.endsWith('++');
+  const parts = plusKey ? [...k.slice(0, -1).split('+').filter(Boolean), '+'] : k.split('+');
+  return parts.map((p) => names[p] ?? p).join(' + ');
 }
 
 export function findBinding(bindings, candidates, context) {

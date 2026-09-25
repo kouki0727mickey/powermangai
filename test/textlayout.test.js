@@ -31,3 +31,9 @@ test('行幅が極端に狭くても無限ループしない', () => {
   assert.deepEqual(wrapText('abc', 1, measure), ['a', 'b', 'c']);
   assert.deepEqual(wrapText('あい', 0, measure), ['あ', 'い']);
 });
+
+test('前に単語がある長い単語も文字単位で分割する', () => {
+  const m = (s) => s.length;
+  assert.deepEqual(wrapText('a abcdefghijklmnop', 5, m), ['a', 'abcde', 'fghij', 'klmno', 'p']);
+  assert.deepEqual(wrapText('あ abcdefgh', 4, m), ['あ', 'abcd', 'efgh']);
+});

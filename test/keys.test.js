@@ -92,6 +92,8 @@ test('同じコンテキストでキーが重複していない', () => {
 test('prettyKey の表示', () => {
   assert.equal(prettyKey('Ctrl+Shift+ArrowUp'), 'Ctrl + Shift + ↑');
   assert.equal(prettyKey('Escape'), 'Esc');
+  assert.equal(prettyKey('Ctrl+Shift++'), 'Ctrl + Shift + +');
+  assert.equal(prettyKey('+'), '+');
 });
 
 test('KeyTips: Alt,H,F,S でフォントサイズ', () => {
