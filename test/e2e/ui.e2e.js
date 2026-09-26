@@ -1488,3 +1488,17 @@ test('マウス: スライドショーはクリックで次へ、ノート欄・
   assert.equal(await ed(() => __pmg.editor.pres.slides[2].notes), 'メモ');
   assert.deepEqual(errors, []);
 });
+
+test('マウス: ドラッグ中にウィンドウを離れてもキー操作が止まらない', async () => {
+  await fresh();
+  await ed(() => { __pmg.editor.slide.objects = []; __pmg.editor.insertObject('rect', { x: 100, y: 100, w: 200, h: 100 }); });
+  const c = await screenOf(200, 150);
+  await page.mouse.move(c.x, c.y);
+  await page.mouse.down();
+  await page.mouse.move(c.x + 40, c.y + 20, { steps: 3 });
+  await ed(() => window.dispatchEvent(new Event('blur')));
+  assert.equal(await ed(() => __pmg.app.drag), null);
+  await page.mouse.up();
+  await keys('Control+z');
+  assert.deepEqual(await ed(() => [__pmg.editor.slide.objects[0].x, __pmg.editor.slide.objects[0].y]), [100, 100], 'ドラッグは確定し、元に戻せる');
+});

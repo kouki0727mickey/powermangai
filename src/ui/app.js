@@ -2579,7 +2579,7 @@ function finishDrag() {
     return;
   }
   if (d.started && editor.endGesture()) setStatus(d.mode === 'move' ? '移動しました' : d.mode === 'rotate' ? '回転しました' : 'サイズを変更しました');
-});
+}
 
 /** マウスの下の図形・ハンドルに合わせてカーソルを変える */
 function updateStageCursor(e) {
