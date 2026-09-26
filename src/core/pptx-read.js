@@ -748,7 +748,9 @@ export async function importPptx(bytes) {
   const pres = createPresentation({ width, height });
   if (theme.id === 'custom') { pres.theme = 'custom'; pres.customTheme = theme; } else pres.theme = theme.id;
   const hf = {};
-  pres.slides = kids(kid(px, 'p:sldIdLst'), 'p:sldId').map((sid) => {
+  const sldIds = kids(kid(px, 'p:sldIdLst'), 'p:sldId');
+  const slideIdOf = new Map(); // .pptx のスライド ID → 読み込んだスライドの ID
+  pres.slides = sldIds.map((sid) => {
     const slidePath = presRels[sid.attrs['r:id']]?.target;
     const sx = pkg.xml(slidePath);
     if (!sx) { warn('見つからないスライド'); return null; }
@@ -772,9 +774,17 @@ export async function importPptx(bytes) {
       if (body) slide.notes = kids(kid(body, 'p:txBody'), 'a:p').map((p) => textOf(p)).join('\n').replace(/\s+$/, '');
     }
     Object.assign(hf, reader.headerFooter);
+    slideIdOf.set(sid.attrs.id, slide.id);
     return slide;
   }).filter(Boolean);
   if (!pres.slides.length) pres.slides.push(createSlide('blank', { width, height }));
+  // セクション（p14:sectionLst）
+  const secList = kids(kid(px, 'p:extLst'), 'p:ext').map((e) => kid(e, 'p14:sectionLst')).find(Boolean);
+  pres.sections = kids(secList, 'p14:section').map((sec) => ({
+    id: newId('sec'),
+    name: sec.attrs.name || '',
+    slideIds: kids(kid(sec, 'p14:sldIdLst'), 'p14:sldId').map((x) => slideIdOf.get(x.attrs.id)).filter(Boolean),
+  }));
   pres.headerFooter = { ...pres.headerFooter, ...hf, hideOnTitle: true };
   // 読み込んだ結果もアプリの形式として検証（範囲外の値を補正）
   const checked = normalizePresentation(JSON.parse(JSON.stringify(pres)));

@@ -63,6 +63,19 @@ export const KEYTIPS = {
       children: [
         { key: 'I', label: '新しいスライド', action: 'gallery:layout' },
         { key: 'L', label: 'レイアウト', action: 'gallery:changeLayout' },
+        {
+          key: 'T1', label: 'セクション',
+          children: [
+            { key: 'A', label: 'セクションの追加', action: 'addSection' },
+            { key: 'R', label: 'セクション名の変更', action: 'renameSection' },
+            { key: 'S', label: 'セクションの削除', action: 'removeSection', args: false },
+            { key: 'D', label: 'セクションとスライドの削除', action: 'removeSection', args: true },
+            { key: 'V', label: 'すべてのセクションの削除', action: 'removeAllSections' },
+            { key: 'U', label: 'セクションを上へ移動', action: 'moveSection', args: -1 },
+            { key: 'N', label: 'セクションを下へ移動', action: 'moveSection', args: 1 },
+            { key: 'L', label: 'セクションのスライドをすべて選択', action: 'selectSection' },
+          ],
+        },
         { key: 'FD', label: '検索', action: 'find' },
         { key: 'R', label: '置換', action: 'replace' },
         { key: 'V', label: '貼り付け', action: 'paste' },

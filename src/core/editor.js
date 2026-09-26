@@ -1,6 +1,7 @@
 // エディター状態と編集コマンド（Undo/Redo 付き）。DOM には依存しない。
 import {
   clone, createObject, createSlide, createPresentation, newId, bounds, hasText, objText, isLine, allParas, hasTextContent, isFrame,
+  syncSections, sectionIndexOf, DEFAULT_SECTION_NAME,
 } from './model.js';
 import { defaultChartData, checkChart } from './chart.js';
 
@@ -72,6 +73,7 @@ export class Editor {
     const before = this.snapshot();
     const presBefore = JSON.stringify(this.pres);
     const result = fn();
+    syncSections(this.pres);
     this.fitAll();
     this.pruneAnimations();
     // 文字の編集中の変更は、編集の終了時に編集全体と合わせて 1 回の操作として履歴に積む
@@ -1162,6 +1164,26 @@ export class Editor {
   moveSlide(dir) {
     const idx = this.selectedSlideIndexes();
     const first = idx[0], count = idx.length;
+    // セクションの境目では、並びを変えずに隣のセクションへ移す（PowerPoint と同じ）
+    const secs = this.pres.sections || [];
+    if (secs.length) {
+      const edge = dir < 0 ? first : idx[idx.length - 1];
+      const si = sectionIndexOf(this.pres, edge);
+      const sec = secs[si];
+      const edgeId = this.pres.slides[edge].id;
+      const atEdge = dir < 0 ? sec.slideIds[0] === edgeId : sec.slideIds.at(-1) === edgeId;
+      const sameSection = idx.every((i) => sectionIndexOf(this.pres, i) === si);
+      if (atEdge && sameSection && secs[si + dir]) {
+        const ids = idx.map((i) => this.pres.slides[i].id);
+        this.mutate(() => {
+          sec.slideIds = sec.slideIds.filter((id) => !ids.includes(id));
+          const next = secs[si + dir];
+          next.slideIds = dir < 0 ? [...next.slideIds, ...ids] : [...ids, ...next.slideIds];
+          // 空のセクションを飛ばして移す場合でも、スライドの順は変わらない
+        });
+        return true;
+      }
+    }
     const to = Math.max(0, Math.min(this.pres.slides.length - count, first + dir));
     if (to === first) return false;
     this.mutate(() => {
@@ -1170,6 +1192,101 @@ export class Editor {
       this.slideIndex += to - first;
       if (this.slideAnchor !== null) this.slideAnchor += to - first;
     });
+    return true;
+  }
+
+  // ---- セクション ----
+  /** 現在のスライドのセクションの番号（無ければ -1） */
+  currentSectionIndex() { return sectionIndexOf(this.pres, this.selectedSlideIndexes()[0]); }
+
+  /** 選択中のスライドの前にセクションを追加。最初のセクションより前にスライドがあれば「既定のセクション」を作る */
+  addSection(name) {
+    const at = this.selectedSlideIndexes()[0];
+    const slides = this.pres.slides;
+    this.mutate(() => {
+      const secs = this.pres.sections || [];
+      const newSec = (nm, ids) => ({ id: newId('sec'), name: nm, slideIds: ids });
+      if (!secs.length) {
+        const ids = slides.map((sl) => sl.id);
+        this.pres.sections = at === 0 ? [newSec(name, ids)] : [newSec(DEFAULT_SECTION_NAME, ids.slice(0, at)), newSec(name, ids.slice(at))];
+        return;
+      }
+      const si = sectionIndexOf(this.pres, at);
+      const sec = secs[si];
+      const k = sec.slideIds.indexOf(slides[at].id);
+      const moved = sec.slideIds.slice(k);
+      sec.slideIds = sec.slideIds.slice(0, k);
+      secs.splice(si + 1, 0, newSec(name, moved));
+    });
+    return true;
+  }
+
+  renameSection(name, index = this.currentSectionIndex()) {
+    const sec = (this.pres.sections || [])[index];
+    if (!sec) return false;
+    this.mutate(() => { sec.name = name; });
+    return true;
+  }
+
+  /** セクションの削除。withSlides ならスライドも削除。スライドは前（先頭なら次）のセクションに入る */
+  removeSection(withSlides = false, index = this.currentSectionIndex()) {
+    const secs = this.pres.sections || [];
+    const sec = secs[index];
+    if (!sec) return false;
+    if (withSlides && sec.slideIds.length === this.pres.slides.length) return false; // スライドが無くなる
+    this.mutate(() => {
+      if (withSlides) {
+        const ids = new Set(sec.slideIds);
+        const firstIdx = this.pres.slides.findIndex((sl) => ids.has(sl.id));
+        this.pres.slides = this.pres.slides.filter((sl) => !ids.has(sl.id));
+        if (firstIdx >= 0) this.slideIndex = Math.min(firstIdx, this.pres.slides.length - 1);
+        this.clearSlideSelection();
+        this.selection = [];
+        this.editingId = null;
+        secs.splice(index, 1);
+      } else {
+        const into = secs[index - 1] || secs[index + 1];
+        if (into) {
+          if (secs[index - 1]) into.slideIds.push(...sec.slideIds); else into.slideIds.unshift(...sec.slideIds);
+        }
+        secs.splice(index, 1);
+      }
+    });
+    return true;
+  }
+
+  removeAllSections() {
+    if (!(this.pres.sections || []).length) return false;
+    this.mutate(() => { this.pres.sections = []; });
+    return true;
+  }
+
+  /** セクションを dir（-1: 上 / 1: 下）へ移動。スライドもまとめて移動する */
+  moveSection(dir, index = this.currentSectionIndex()) {
+    const secs = this.pres.sections || [];
+    const to = index + dir;
+    if (!secs[index] || !secs[to]) return false;
+    const curId = this.slide.id;
+    this.mutate(() => {
+      [secs[index], secs[to]] = [secs[to], secs[index]];
+      const byId = new Map(this.pres.slides.map((sl) => [sl.id, sl]));
+      this.pres.slides = secs.flatMap((sec) => sec.slideIds.map((id) => byId.get(id)));
+      this.slideIndex = this.pres.slides.findIndex((sl) => sl.id === curId);
+      this.clearSlideSelection();
+    });
+    return true;
+  }
+
+  /** セクション内のスライドをすべて選択 */
+  selectSection(index = this.currentSectionIndex()) {
+    const sec = (this.pres.sections || [])[index];
+    if (!sec || !sec.slideIds.length) return false;
+    const first = this.pres.slides.findIndex((sl) => sl.id === sec.slideIds[0]);
+    this.slideIndex = first;
+    this.slideAnchor = first;
+    this.slideSel = sec.slideIds.length > 1 ? [...sec.slideIds] : null;
+    this.selection = [];
+    this.emit();
     return true;
   }
 }

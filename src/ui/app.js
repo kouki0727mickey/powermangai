@@ -167,8 +167,9 @@ function renderThumbs() {
     const c = document.createElement('canvas');
     c.width = Math.round(150 * dpr);
     c.height = Math.round(84 * dpr);
-    pane.append(h('div', { class: 'thumb' }, h('span', { class: 'num' }), c));
+    pane.append(h('div', { class: 'thumb' }, h('div', { class: 'section-head' }), h('div', { class: 'thumb-row' }, h('span', { class: 'num' }), c)));
   }
+  const heads = sectionHeads();
   thumbCache.length = slides.length;
   const sel = editor.selectedSlideIndexes();
   const multi = new Set(sel.length > 1 ? sel : []);
@@ -178,6 +179,7 @@ function renderThumbs() {
     el.classList.toggle('multi', multi.has(i));
     el.classList.toggle('hidden-slide', !!s.hidden);
     el.querySelector('.num').textContent = String(i + 1);
+    setSectionHead(el.querySelector('.section-head'), heads.get(i));
     const json = JSON.stringify(s) + editor.pres.theme + JSON.stringify(editor.pres.headerFooter) + i;
     if (thumbCache[i] !== json) {
       const c = el.querySelector('canvas');
@@ -244,27 +246,66 @@ function leaveNotes() {
   editor.pane = 'editor';
 }
 
-let sorterCache = [];
-function sorterColumns() {
-  const el = $('sorter');
-  return Math.max(1, Math.floor((el.clientWidth - 32 + 18) / (240 + 18)));
+/** スライド番号 → そのスライドから始まるセクション（見出しを表示する位置）。空のセクションは次のスライドの前にまとめる */
+function sectionHeads() {
+  const map = new Map();
+  const secs = editor.pres.sections || [];
+  const index = new Map(editor.pres.slides.map((sl, i) => [sl.id, i]));
+  let pending = [];
+  for (const sec of secs) {
+    pending.push(sec);
+    if (sec.slideIds.length) { map.set(index.get(sec.slideIds[0]), pending); pending = []; }
+  }
+  if (pending.length) map.set(editor.pres.slides.length, pending); // 末尾の空のセクション
+  return map;
 }
 
+function setSectionHead(el, secs) {
+  el.hidden = !secs;
+  if (!secs) return;
+  const cur = editor.currentSectionIndex();
+  el.textContent = '';
+  for (const sec of secs) {
+    const i = editor.pres.sections.indexOf(sec);
+    el.append(h('div', { class: `section-name${i === cur ? ' current' : ''}`, text: `${sec.name || '（名前なし）'}（${sec.slideIds.length}）` }));
+  }
+}
+
+let sorterCache = [];
+const sorterItems = [];
+let sorterHeads = [];
 function renderSorter() {
   const el = $('sorter');
   const slides = editor.pres.slides;
   const dpr = window.devicePixelRatio || 1;
   const H = Math.round((240 * editor.pres.height) / editor.pres.width);
-  while (el.children.length > slides.length) el.lastChild.remove();
-  while (el.children.length < slides.length) {
+  while (sorterItems.length > slides.length) sorterItems.pop().remove();
+  while (sorterItems.length < slides.length) {
     const c = document.createElement('canvas');
-    el.append(h('div', { class: 'sorter-item' }, c, h('span', { class: 'num' })));
+    const item = h('div', { class: 'sorter-item' }, c, h('span', { class: 'num' }));
+    sorterItems.push(item);
+    el.append(item);
   }
+  // セクションの見出しは、そのセクションの最初のスライドの前に（行を分ける）
+  const heads = sectionHeads();
+  const order = [];
+  sorterHeads.forEach((x) => x.remove());
+  sorterHeads = [];
+  for (let i = 0; i <= slides.length; i++) {
+    if (heads.has(i)) {
+      const head = h('div', { class: 'sorter-section' });
+      setSectionHead(head, heads.get(i));
+      sorterHeads.push(head);
+      order.push(head);
+    }
+    if (i < slides.length) order.push(sorterItems[i]);
+  }
+  order.forEach((node) => el.append(node));
   sorterCache.length = slides.length;
   const selIdx = editor.selectedSlideIndexes();
   const multiSel = new Set(selIdx.length > 1 ? selIdx : []);
   slides.forEach((s, i) => {
-    const item = el.children[i];
+    const item = sorterItems[i];
     item.classList.toggle('current', i === editor.slideIndex);
     item.classList.toggle('multi', multiSel.has(i));
     item.classList.toggle('hidden-slide', !!s.hidden);
@@ -278,7 +319,20 @@ function renderSorter() {
       sorterCache[i] = key;
     }
   });
-  el.children[editor.slideIndex]?.scrollIntoView({ block: 'nearest' });
+  sorterItems[editor.slideIndex]?.scrollIntoView({ block: 'nearest' });
+}
+
+/** スライド一覧表示で上下の行のスライド（セクションで行が分かれるので、画面上の位置で探す） */
+function sorterVertical(dir) {
+  const rects = sorterItems.map((it) => it.getBoundingClientRect());
+  const cur = rects[editor.slideIndex];
+  if (!cur) return false;
+  const rows = rects.map((r, i) => ({ i, top: r.top, x: r.left })).filter((r) => (dir > 0 ? r.top > cur.top + 1 : r.top < cur.top - 1));
+  if (!rows.length) return false;
+  const rowTop = dir > 0 ? Math.min(...rows.map((r) => r.top)) : Math.max(...rows.map((r) => r.top));
+  const inRow = rows.filter((r) => Math.abs(r.top - rowTop) < 1);
+  inRow.sort((a, b) => Math.abs(a.x - cur.left) - Math.abs(b.x - cur.left) || a.i - b.i);
+  return editor.gotoSlide(inRow[0].i);
 }
 
 function setView(view) {
@@ -333,7 +387,8 @@ function renderStatus() {
   if (sel.length === 1) selText = `選択: ${displayName(sel[0], editor.slide)}`;
   else if (sel.length > 1) selText = `選択: ${sel.length} 個${sel.every((o) => o.groupId && o.groupId === sel[0].groupId) ? '（グループ）' : ''}`;
   $('status-selection').textContent = selText;
-  $('status-view').textContent = `${editor.slide.hidden ? '非表示スライド ／ ' : ''}${app.view === 'sorter' ? 'スライド一覧 ／ ' : ''}ズーム ${app.zoom ? `${app.zoom}%` : 'ウィンドウに合わせる'}${app.grid ? ' ／ グリッド' : ''}${app.guides ? ' ／ ガイド' : ''}`;
+  const sec = editor.pres.sections?.[editor.currentSectionIndex()];
+  $('status-view').textContent = `${sec ? `セクション: ${sec.name || '（名前なし）'} ／ ` : ''}${editor.slide.hidden ? '非表示スライド ／ ' : ''}${app.view === 'sorter' ? 'スライド一覧 ／ ' : ''}ズーム ${app.zoom ? `${app.zoom}%` : 'ウィンドウに合わせる'}${app.grid ? ' ／ グリッド' : ''}${app.guides ? ' ／ ガイド' : ''}`;
 }
 
 function renderTitle() {
@@ -733,8 +788,8 @@ const ACTIONS = {
   focusEditor: () => { if (app.view === 'sorter') setView('normal'); else { editor.pane = 'editor'; render(); } },
   nextPane: () => togglePane(1),
   prevPane: () => togglePane(-1),
-  sorterDown: () => editor.gotoSlide(Math.min(editor.pres.slides.length - 1, editor.slideIndex + sorterColumns())),
-  sorterUp: () => editor.gotoSlide(Math.max(0, editor.slideIndex - sorterColumns())),
+  sorterDown: () => sorterVertical(1),
+  sorterUp: () => sorterVertical(-1),
 
   // スライドショー
   showFromStart: () => startShow(0, { fromStart: true }),
@@ -846,6 +901,38 @@ const ACTIONS = {
     }
     return ok;
   },
+  // セクション
+  addSection: async () => {
+    const name = await openInput('セクションの追加', { value: 'タイトルなしのセクション', label: 'セクション名（選択中のスライドの前に追加します）' });
+    if (name === null) return false;
+    editor.addSection(name);
+    setStatus(`セクション「${name}」を追加しました`);
+    return true;
+  },
+  renameSection: async () => {
+    const sec = editor.pres.sections[editor.currentSectionIndex()];
+    if (!sec) return needSection();
+    const name = await openInput('セクション名の変更', { value: sec.name, label: 'セクション名' });
+    if (name !== null) editor.renameSection(name);
+    return true;
+  },
+  removeSection: (withSlides) => {
+    if (editor.currentSectionIndex() < 0) return needSection();
+    if (!editor.removeSection(withSlides)) { setStatus('すべてのスライドを削除することはできません'); return false; }
+    return true;
+  },
+  removeAllSections: () => editor.removeAllSections() || needSection(),
+  moveSection: (dir) => {
+    if (editor.currentSectionIndex() < 0) return needSection();
+    return editor.moveSection(dir) || (setStatus(dir < 0 ? '最初のセクションです' : '最後のセクションです'), false);
+  },
+  selectSection: () => {
+    if (!editor.selectSection()) return needSection();
+    if (app.view !== 'sorter') editor.pane = 'slides';
+    render();
+    return true;
+  },
+
   // グラフ
   insertChart: async () => {
     const kind = await chooseChartKind('グラフの挿入');
@@ -1360,6 +1447,7 @@ async function inputFontFamily() {
 }
 
 const cannotRotate = () => { setStatus('表とグラフは回転・反転できません'); return false; };
+const needSection = () => { setStatus('セクションがありません（Alt → H → T → 1 → A で追加）'); return false; };
 const needChart = () => { setStatus('グラフを選択してください'); return false; };
 async function chooseChartKind(title, current) {
   const i = CHART_KINDS.findIndex((k) => k.id === current);

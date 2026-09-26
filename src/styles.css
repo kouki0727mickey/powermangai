@@ -51,7 +51,12 @@ body.mouse-blocked * { cursor: not-allowed !important; }
   border-right: 1px solid var(--border);
 }
 #thumbs.pane-focus { outline: 2px solid var(--focus); outline-offset: -2px; }
-.thumb { display: flex; gap: 6px; margin-bottom: 10px; align-items: flex-start; }
+.thumb { margin-bottom: 10px; }
+.thumb-row { display: flex; gap: 6px; align-items: flex-start; }
+.section-head { margin: 4px 0 6px; }
+.section-name, .sorter-section .section-name { font-size: 12px; font-weight: bold; color: var(--text); padding: 2px 4px; border-bottom: 1px solid var(--border); }
+.section-name.current { color: var(--accent-dark); }
+.sorter-section { flex-basis: 100%; }
 .thumb .num { width: 18px; text-align: right; font-size: 12px; color: var(--muted); }
 .thumb canvas { width: 150px; height: 84px; background: #fff; border: 1px solid var(--border); }
 .thumb.current canvas { border: 2px solid var(--accent); }

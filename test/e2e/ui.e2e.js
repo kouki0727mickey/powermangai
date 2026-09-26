@@ -1182,3 +1182,39 @@ test('グラフ タイトルを空にしてから Alt → J → C → A → T �
   await alt('j', 'c', 'a', 't');
   assert.deepEqual([(await c()).title, (await c()).showTitle], ['グラフ タイトル', true]);
 });
+
+test('セクション（Alt → H → T → 1）: 追加・見出しの表示・一覧表示での行の移動・名前の変更', async () => {
+  await fresh();
+  await keys('Control+m', 'Control+m', 'Control+m', 'Control+m'); // 5 枚、現在は 5 枚目
+  await ed(() => __pmg.editor.gotoSlide(2)); // 3 枚目
+  await alt('h', 't', '1', 'a');
+  await page.waitForSelector('.dialog input');
+  await keys('Control+a');
+  await page.keyboard.type('後半');
+  await keys('Enter');
+  const heads = () => page.$$eval('#thumbs .section-head:not([hidden]) .section-name', (els) => els.map((e) => e.textContent));
+  assert.deepEqual(await heads(), ['既定のセクション（2）', '後半（3）']);
+  assert.match(await page.textContent('#status-view'), /セクション: 後半/);
+  // 一覧表示ではセクションごとに行が分かれる: ↓ で次のセクションの行へ
+  await alt('w', 'i');
+  await keys('Home', 'ArrowDown');
+  assert.equal(await ed(() => __pmg.editor.slideIndex), 2);
+  await keys('ArrowUp');
+  assert.equal(await ed(() => __pmg.editor.slideIndex), 0);
+  await keys('Enter');
+  // 名前の変更と、セクションのスライドをすべて選択
+  await ed(() => __pmg.editor.gotoSlide(3));
+  await alt('h', 't', '1', 'r');
+  await page.waitForSelector('.dialog input');
+  await keys('Control+a');
+  await page.keyboard.type('まとめ');
+  await keys('Enter');
+  await alt('h', 't', '1', 'l');
+  assert.deepEqual(await ed(() => __pmg.editor.selectedSlideIndexes()), [2, 3, 4]);
+  assert.deepEqual(await heads(), ['既定のセクション（2）', 'まとめ（3）']);
+  // Alt → 2（元に戻す）で名前が戻る
+  await keys('Escape');
+  await alt('2');
+  assert.deepEqual(await heads(), ['既定のセクション（2）', '後半（3）']);
+  assert.deepEqual(errors, []);
+});

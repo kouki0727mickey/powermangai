@@ -591,6 +591,18 @@ function notesSlideXml(text) {
 const relsXml = (rels) => XML_HEAD + tag('Relationships', { xmlns: 'http://schemas.openxmlformats.org/package/2006/relationships' },
   rels.map(([id, type, target, mode]) => tag('Relationship', { Id: id, Type: type.startsWith('http') ? type : `${REL}/${type}`, Target: target, TargetMode: mode })));
 
+/** セクション（PowerPoint 2010 の拡張: p14:sectionLst）。スライドの ID は sldIdLst と同じ 256 + 番号 */
+function sectionsXml(pres) {
+  const secs = pres.sections || [];
+  if (!secs.length) return '';
+  const index = new Map(pres.slides.map((sl, i) => [sl.id, i]));
+  const guid = (i) => `{5E0C1A2B-0000-4000-8000-${(i + 1).toString(16).toUpperCase().padStart(12, '0')}}`;
+  return tag('p:extLst', {}, tag('p:ext', { uri: '{521415D9-36F7-43E2-AB2F-B90AF26B5E84}' },
+    tag('p14:sectionLst', { 'xmlns:p14': 'http://schemas.microsoft.com/office/powerpoint/2010/main' },
+      secs.map((sec, i) => tag('p14:section', { name: sec.name, id: guid(i) },
+        tag('p14:sldIdLst', {}, sec.slideIds.filter((id) => index.has(id)).map((id) => tag('p14:sldId', { id: 256 + index.get(id) }))))))));
+}
+
 // ---------------------------------------------------------------- パッケージ全体
 /** プレゼンテーション → { パス: 文字列 | Uint8Array } */
 export function buildPptxFiles(pres, { title = '' } = {}) {
@@ -686,7 +698,8 @@ export function buildPptxFiles(pres, { title = '' } = {}) {
     tag('p:sldIdLst', {}, sldIds),
     tag('p:sldSz', { cx: emu(pres.width), cy: emu(pres.height), type: std ? 'screen4x3' : wide ? undefined : 'custom' }),
     tag('p:notesSz', { cx: 6858000, cy: 9144000 }),
-    tag('p:defaultTextStyle', {}, tag('a:defPPr', {}, tag('a:defRPr', { lang: 'ja-JP' })), lvlPPr(0, { size: 18, bullet: false })));
+    tag('p:defaultTextStyle', {}, tag('a:defPPr', {}, tag('a:defRPr', { lang: 'ja-JP' })), lvlPPr(0, { size: 18, bullet: false })),
+    sectionsXml(pres));
   files['ppt/_rels/presentation.xml.rels'] = relsXml(presRels);
   overrides.push(['/ppt/presentation.xml', `${CT}.presentation.main+xml`]);
   files['ppt/presProps.xml'] = XML_HEAD + tag('p:presentationPr', nsAttrs);

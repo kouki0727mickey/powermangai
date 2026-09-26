@@ -191,7 +191,52 @@ export function createPresentation(size = SLIDE_SIZES[0]) {
     theme: 'office',
     headerFooter: { slideNumber: false, footer: '', showFooter: false, date: false, hideOnTitle: true },
     slides: [createSlide('title', size)],
+    sections: [],
   };
+}
+
+// ---- セクション: [{ id, name, slideIds }]。slideIds を順につなぐとスライドの順になる（セクションが無ければ空の配列）
+export const DEFAULT_SECTION_NAME = '既定のセクション';
+
+/**
+ * スライドの追加・削除・並べ替えの後に、セクションの slideIds をスライドの順に合わせる。
+ * 新しいスライドは直前のスライドのセクションに入る。セクションの順は変えない（前のセクションに戻るスライドは今のセクションに入る）。
+ */
+export function syncSections(pres) {
+  const secs = pres.sections;
+  if (!secs || secs.length === 0) { pres.sections = []; return; }
+  const owner = new Map();
+  secs.forEach((sec, i) => { for (const id of sec.slideIds) if (!owner.has(id)) owner.set(id, i); });
+  for (const sec of secs) sec.slideIds = [];
+  let cur = 0;
+  let first = true;
+  for (const sl of pres.slides) {
+    const s = owner.get(sl.id);
+    // 最初のスライドは記録どおりのセクション（前に空のセクションがあってもよい）
+    if (s !== undefined && (s > cur || first)) cur = s;
+    first = false;
+    secs[cur].slideIds.push(sl.id);
+  }
+}
+
+/** スライド番号 → セクションの番号（セクションが無ければ -1） */
+export function sectionIndexOf(pres, slideIndex) {
+  const id = pres.slides[slideIndex]?.id;
+  return (pres.sections || []).findIndex((sec) => sec.slideIds.includes(id));
+}
+
+function checkSections(list, slides) {
+  if (!Array.isArray(list)) return [];
+  const ids = new Set(slides.map((s) => s.id));
+  const seen = new Set();
+  const out = list.filter((sec) => sec && typeof sec === 'object').slice(0, 1000).map((sec) => ({
+    id: typeof sec.id === 'string' ? sec.id : newId('sec'),
+    name: typeof sec.name === 'string' ? sec.name.slice(0, 200) : '',
+    slideIds: Array.isArray(sec.slideIds) ? sec.slideIds.filter((id) => ids.has(id) && !seen.has(id) && seen.add(id)) : [],
+  }));
+  const pres = { slides, sections: out };
+  syncSections(pres);
+  return pres.sections;
 }
 
 // ---- 読み込み時の検証
@@ -345,6 +390,7 @@ export function normalizePresentation(data) {
   };
   pres.slides = data.slides.map((s) => checkSlide(s, size));
   if (pres.slides.length === 0) pres.slides.push(createSlide('blank', size));
+  pres.sections = checkSections(data.sections, pres.slides);
   return pres;
 }
 
