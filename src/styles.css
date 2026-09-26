@@ -219,3 +219,11 @@ body.mouse-blocked * { cursor: not-allowed !important; }
 
 .thumb.multi canvas, .sorter-item.multi canvas { outline: 3px solid #f4b183; outline-offset: 1px; }
 .gallery.compact .item { padding: 4px; font-size: 18px; }
+
+.chart-grid-wrap { max-height: 50vh; max-width: 70vw; overflow: auto; border: 1px solid var(--border); }
+.chart-grid { border-collapse: collapse; }
+.chart-grid td { padding: 0; border: 1px solid #d0d0d0; }
+.chart-grid input { width: 90px; border: none; padding: 3px 5px; font: inherit; background: transparent; }
+.chart-grid input.head { background: #f3f3f3; }
+.chart-grid input.corner { background: #e6e6e6; }
+.chart-grid input:focus { outline: 2px solid var(--focus); outline-offset: -2px; background: #fff; }

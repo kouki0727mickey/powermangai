@@ -121,6 +121,7 @@ export const KEYTIPS = {
         { key: 'X', label: 'テキスト ボックス', action: 'insertTextBox' },
         { key: 'SH', label: '図形', action: 'gallery:shapes' },
         { key: 'T', label: '表', action: 'insertTable' },
+        { key: 'C', label: 'グラフ', action: 'insertChart' },
         { key: 'P', label: '画像（このデバイス）', action: 'insertPicture' },
         { key: 'H', label: 'ヘッダーとフッター', action: 'headerFooter' },
         { key: 'K', label: 'リンク', action: 'hyperlink' },
@@ -160,6 +161,24 @@ export const KEYTIPS = {
         { key: 'H', label: 'タイトル行（見出し）', action: 'toggleTableProp', args: 'headerRow' },
         { key: 'B', label: '縞模様（行）', action: 'toggleTableProp', args: 'bandedRows' },
         { key: 'S', label: '塗りつぶし（セル）', action: 'palette:cellFill' },
+      ],
+    },
+    {
+      key: 'JC', label: 'グラフのデザイン',
+      children: [
+        {
+          key: 'A', label: 'グラフ要素を追加',
+          children: [
+            { key: 'T', label: 'グラフ タイトル', action: 'chartToggle', args: 'showTitle' },
+            { key: 'L', label: '凡例', action: 'chartToggle', args: 'showLegend' },
+            { key: 'D', label: 'データ ラベル', action: 'chartToggle', args: 'dataLabels' },
+            { key: 'G', label: '目盛線', action: 'chartToggle', args: 'gridlines' },
+          ],
+        },
+        { key: 'D', label: 'データの編集', action: 'chartData' },
+        { key: 'C', label: 'グラフの種類の変更', action: 'chartType' },
+        { key: 'H', label: '色の変更', action: 'chartColors' },
+        { key: 'T', label: 'グラフ タイトルの文字', action: 'chartTitle' },
       ],
     },
     {

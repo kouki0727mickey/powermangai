@@ -784,3 +784,138 @@ export function openAnimationPane(api) {
   render();
   return d.show();
 }
+
+// ---------------------------------------------------------------- グラフのデータ
+/**
+ * 表計算のようにグラフのデータを編集する。1 行目は系列名、1 列目は分類名。
+ * 戻り値: { categories, series: [{ name, values }] } か null。
+ */
+export function openChartData(chart, { maxCategories = 100, maxSeries = 50 } = {}) {
+  const d = new Dialog('データの編集',
+    '矢印 / Tab / Enter: セルの移動 ／ F2: セル内の編集 ／ Insert: 行（分類）を追加 ／ Ctrl+Insert: 列（系列）を追加 ／ Ctrl+Delete: 行を削除 ／ Ctrl+Shift+Delete: 列を削除 ／ Ctrl+Enter: OK ／ Esc: キャンセル');
+  // grid[r][c]: 文字列。grid[0][0] は使わない
+  const grid = [['', ...chart.series.map((s) => s.name)],
+    ...chart.categories.map((cat, i) => [cat, ...chart.series.map((s) => (s.values[i] === null || s.values[i] === undefined ? '' : String(s.values[i])))])];
+  let pos = { r: 1, c: 1 };
+  const wrap = h('div', { class: 'chart-grid-wrap' });
+  const err = h('div', { style: { color: 'var(--ng)', minHeight: '18px', marginTop: '4px' } });
+  d.body.append(wrap, err);
+  let inputs = [];
+  const build = () => {
+    wrap.textContent = '';
+    const table = h('table', { class: 'chart-grid' });
+    inputs = grid.map((row, r) => {
+      const tr = h('tr');
+      const cells = row.map((v, c) => {
+        const input = h('input', { type: 'text', 'aria-label': r === 0 ? `系列名 ${c}` : c === 0 ? `分類 ${r}` : `値 ${r}-${c}` });
+        input.value = v;
+        if (r === 0 && c === 0) { input.readOnly = true; input.tabIndex = -1; input.classList.add('corner'); }
+        if (r === 0 || c === 0) input.classList.add('head');
+        input.addEventListener('input', () => { grid[r][c] = input.value; });
+        tr.append(h('td', {}, input));
+        return input;
+      });
+      table.append(tr);
+      return cells;
+    });
+    wrap.append(table);
+  };
+  const focusCell = () => {
+    pos.r = Math.max(0, Math.min(grid.length - 1, pos.r));
+    pos.c = Math.max(0, Math.min(grid[0].length - 1, pos.c));
+    if (pos.r === 0 && pos.c === 0) pos.c = 1;
+    const input = inputs[pos.r][pos.c];
+    input.focus();
+    input.select();
+    input.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  };
+  // Excel と同じく、F2 を押したとき（編集モード）だけ ← → でセル内のカーソルを動かす
+  let editMode = false;
+  const move = (dr, dc) => {
+    editMode = false;
+    pos = { r: pos.r + dr, c: pos.c + dc };
+    if (pos.r === 0 && pos.c === 0) {
+      // 左上の空欄は飛ばす
+      if (dc < 0) { pos.c = grid[0].length - 1; } else pos.c = 1;
+    }
+    focusCell();
+  };
+  const result = () => {
+    const categories = grid.slice(1).map((row) => row[0]);
+    const series = grid[0].slice(1).map((name, i) => ({
+      name,
+      values: grid.slice(1).map((row) => {
+        const t = row[i + 1].trim().replace(/[,，]/g, '');
+        return t === '' ? null : Number(t);
+      }),
+    }));
+    for (let r = 1; r < grid.length; r++) {
+      for (let c = 1; c < grid[0].length; c++) {
+        const t = grid[r][c].trim().replace(/[,，]/g, '');
+        if (t !== '' && !Number.isFinite(Number(t))) { pos = { r, c }; return null; }
+      }
+    }
+    return { categories, series };
+  };
+  d.focus = () => focusCell();
+  d.handleKey = (e) => {
+    if (e.isComposing) return false;
+    const input = inputs[pos.r]?.[pos.c];
+    switch (e.key) {
+      case 'F2':
+        editMode = true;
+        input.setSelectionRange(input.value.length, input.value.length);
+        return true;
+      case 'Escape': d.close(null); return true;
+      case 'Enter':
+        if (e.ctrlKey) {
+          const r = result();
+          if (!r) { err.textContent = '数値以外の値があります（空欄は空白のまま）'; focusCell(); return true; }
+          d.close(r);
+          return true;
+        }
+        move(e.shiftKey ? -1 : 1, 0);
+        return true;
+      case 'Tab': move(0, e.shiftKey ? -1 : 1); return true;
+      case 'ArrowUp': move(-1, 0); return true;
+      case 'ArrowDown': move(1, 0); return true;
+      case 'ArrowLeft': if (editMode || e.shiftKey) return false; move(0, -1); return true;
+      case 'ArrowRight': if (editMode || e.shiftKey) return false; move(0, 1); return true;
+      case 'Insert':
+        if (e.ctrlKey) {
+          if (grid[0].length - 1 >= maxSeries) { err.textContent = `系列は ${maxSeries} 個までです`; return true; }
+          const at = Math.max(1, pos.c) + 1;
+          grid.forEach((row, r) => row.splice(at, 0, r === 0 ? `系列 ${grid[0].length}` : ''));
+          build();
+          pos = { r: pos.r, c: at };
+          editMode = false;
+        } else {
+          if (grid.length - 1 >= maxCategories) { err.textContent = `分類は ${maxCategories} 個までです`; return true; }
+          const at = Math.max(1, pos.r) + 1;
+          grid.splice(at, 0, [`分類 ${grid.length}`, ...grid[0].slice(1).map(() => '')]);
+          build();
+          pos = { r: at, c: pos.c };
+          editMode = false;
+        }
+        focusCell();
+        return true;
+      case 'Delete':
+        if (!e.ctrlKey) return false;
+        if (e.shiftKey) {
+          if (grid[0].length <= 2) { err.textContent = '系列は 1 つ以上必要です'; return true; }
+          const at = Math.max(1, pos.c);
+          grid.forEach((row) => row.splice(at, 1));
+        } else {
+          if (grid.length <= 2) { err.textContent = '分類は 1 つ以上必要です'; return true; }
+          grid.splice(Math.max(1, pos.r), 1);
+        }
+        build();
+        focusCell();
+        return true;
+      default:
+        return false;
+    }
+  };
+  build();
+  return d.show();
+}

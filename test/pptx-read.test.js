@@ -213,3 +213,39 @@ test('蛍光ペンと文字の間隔の往復（python-pptx でも読める XML�
   const runs = pres.slides[0].objects[0].paragraphs[0].runs;
   assert.deepEqual(runs.map((r) => [r.text, r.font.highlight, r.font.spacing]), [['四半期', '#FFFF00', 3], ['の報告', '@accent2', -1.5]]);
 });
+
+test('python-pptx で作ったグラフを読み込める（縦棒・積み上げ横棒・マーカー付き折れ線・円・ドーナツ）', { skip: !hasPythonPptx }, async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'pmgchart-'));
+  const file = path.join(dir, 'chart.pptx');
+  execFileSync('python3', ['-c', `
+from pptx import Presentation
+from pptx.chart.data import CategoryChartData
+from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
+from pptx.util import Inches
+p = Presentation()
+s = p.slides.add_slide(p.slide_layouts[6])
+d = CategoryChartData()
+d.categories = ['東', '西', '南']
+d.add_series('売上', (1.5, 2, None))
+d.add_series('利益', (0.5, -1, 3))
+kinds = [XL_CHART_TYPE.COLUMN_CLUSTERED, XL_CHART_TYPE.BAR_STACKED, XL_CHART_TYPE.LINE_MARKERS, XL_CHART_TYPE.PIE, XL_CHART_TYPE.DOUGHNUT]
+for i, k in enumerate(kinds):
+    gf = s.shapes.add_chart(k, Inches(0.2 + i * 1.9), Inches(1), Inches(1.8), Inches(2), d)
+    c = gf.chart
+    if i == 0:
+        c.has_title = True
+        c.chart_title.text_frame.text = '地域別'
+        c.has_legend = True
+        c.legend.position = XL_LEGEND_POSITION.BOTTOM
+        c.plots[0].has_data_labels = True
+p.save('${file}')
+`]);
+  const { pres, warnings } = await importPptx(readFileSync(file));
+  const charts = pres.slides[0].objects.filter((o) => o.type === 'chart').map((o) => o.chart);
+  assert.deepEqual(charts.map((c) => c.kind), ['column', 'stackedBar', 'lineMarkers', 'pie', 'doughnut'], JSON.stringify(warnings));
+  const c = charts[0];
+  assert.deepEqual(c.categories, ['東', '西', '南']);
+  assert.deepEqual(c.series, [{ name: '売上', values: [1.5, 2, null] }, { name: '利益', values: [0.5, -1, 3] }]);
+  assert.deepEqual([c.title, c.showTitle, c.showLegend, c.dataLabels], ['地域別', true, true, true]);
+  assert.equal(charts[1].showLegend, false);
+});

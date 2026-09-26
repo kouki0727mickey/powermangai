@@ -4,6 +4,7 @@ import { layoutObjectText, effectiveFont, layoutVertical } from '../core/textlay
 import { buildShape, buildDetail, EVENODD } from '../core/shapes.js';
 import { resolveColor, themeOf, DEFAULT_THEME } from '../core/colors.js';
 import { tableLayout, cellDisplayFont } from '../core/table.js';
+import { chartLayout } from '../core/chart.js';
 
 const FONT_FALLBACK = '"Yu Gothic UI", "Yu Gothic", Meiryo, "Hiragino Sans", "Noto Sans CJK JP", "Noto Sans JP", sans-serif';
 
@@ -139,6 +140,78 @@ export function drawTextLines(ctx, lines, theme) {
   }
 }
 
+/** グラフ（原点はオブジェクトの左上）。グラフ エリアの塗りつぶし・枠線の上に描く */
+function drawChart(ctx, o, theme) {
+  const fill = resolveColor(o.fill, theme);
+  if (fill) { ctx.fillStyle = fill; ctx.fillRect(0, 0, o.w, o.h); ctx.shadowColor = 'transparent'; }
+  const stroke = resolveColor(o.stroke, theme);
+  if (stroke && o.strokeWidth > 0) {
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = o.strokeWidth;
+    ctx.setLineDash((DASH[o.dash] || []).map((d) => d * Math.max(1, o.strokeWidth)));
+    ctx.strokeRect(0, 0, o.w, o.h);
+    ctx.setLineDash([]);
+  }
+  ctx.shadowColor = 'transparent';
+  const measure = (f, text) => measureText(effectiveFont(f, theme), text);
+  const { items } = chartLayout(o.chart, o.w, o.h, measure);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, o.w, o.h);
+  ctx.clip();
+  for (const it of items) {
+    switch (it.t) {
+      case 'rect':
+        ctx.fillStyle = resolveColor(it.fill, theme);
+        ctx.fillRect(it.x, it.y, it.w, it.h);
+        break;
+      case 'poly':
+        ctx.fillStyle = resolveColor(it.fill, theme);
+        ctx.beginPath();
+        it.pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+        ctx.closePath();
+        ctx.fill();
+        break;
+      case 'line':
+        ctx.strokeStyle = resolveColor(it.color, theme);
+        ctx.lineWidth = it.width;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        it.pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+        ctx.stroke();
+        break;
+      case 'marker':
+        ctx.fillStyle = resolveColor(it.fill, theme);
+        ctx.beginPath();
+        ctx.arc(it.x, it.y, it.size / 2 + 1, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      case 'wedge':
+        ctx.fillStyle = resolveColor(it.fill, theme);
+        ctx.beginPath();
+        ctx.arc(it.cx, it.cy, it.r, it.a0, it.a1);
+        if (it.r0) ctx.arc(it.cx, it.cy, it.r0, it.a1, it.a0, true);
+        else ctx.lineTo(it.cx, it.cy);
+        ctx.closePath();
+        ctx.fill();
+        if (it.stroke) { ctx.strokeStyle = resolveColor(it.stroke, theme); ctx.lineWidth = 1; ctx.lineJoin = 'round'; ctx.stroke(); }
+        break;
+      case 'text':
+        ctx.font = fontCss(effectiveFont({ family: '+minor', size: it.size }, theme));
+        ctx.fillStyle = resolveColor(it.color, theme);
+        ctx.textAlign = it.align;
+        ctx.textBaseline = it.baseline;
+        ctx.fillText(it.text, it.x, it.y);
+        break;
+      default:
+    }
+  }
+  ctx.restore();
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+}
+
 function placeholderView(o) {
   // プレースホルダーのプロンプト文字（灰色）
   const p0 = o.paragraphs[0];
@@ -218,6 +291,8 @@ export function drawObject(ctx, o, opts = {}) {
   } else if (o.type === 'table') {
     ctx.shadowColor = 'transparent';
     drawTable(ctx, o, theme, opts.hideCell);
+  } else if (o.type === 'chart') {
+    drawChart(ctx, o, theme);
   } else {
     ctx.beginPath();
     buildShape(ctx, o.type, o.w, o.h);

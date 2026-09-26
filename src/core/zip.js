@@ -84,14 +84,15 @@ export async function readZip(buf) {
   return files;
 }
 
-/** { パス: Uint8Array | string } から ZIP を作る */
+/** { パス: Uint8Array | string | { zip: 入れ子の entries } } から ZIP を作る */
 export async function writeZip(entries) {
   const encoder = new TextEncoder();
   const parts = [];
   const central = [];
   let offset = 0;
   for (const [name, content] of Object.entries(entries)) {
-    const data = typeof content === 'string' ? encoder.encode(content) : content;
+    const data = typeof content === 'string' ? encoder.encode(content)
+      : content instanceof Uint8Array ? content : await writeZip(content.zip);
     const nameBytes = encoder.encode(name);
     const crc = crc32(data);
     const deflated = await deflateRaw(data);

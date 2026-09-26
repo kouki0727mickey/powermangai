@@ -4,6 +4,7 @@ import {
 } from './richtext.js';
 import { isColorValue, THEMES, checkCustomTheme } from './colors.js';
 import { TRANSITIONS, EFFECTS } from './animation.js';
+import { checkChart } from './chart.js';
 
 const TRANSITION_IDS = new Set(TRANSITIONS.map((t) => t.id));
 const EFFECT_IDS = new Set(EFFECTS.map((e) => e.id));
@@ -36,7 +37,7 @@ export const SHAPE_LABELS = {
   wedgeRectCallout: '吹き出し: 四角形', wedgeEllipseCallout: '吹き出し: 円形', cloud: '雲',
   can: '円柱', cube: '直方体', frame: 'フレーム', smileyFace: 'スマイル', lightningBolt: '稲妻',
   line: '直線', arrow: '線矢印', doubleArrow: '線矢印: 双方向',
-  table: '表', image: '図',
+  table: '表', image: '図', chart: 'グラフ',
 };
 
 export const DASHES = ['solid', 'dash', 'dot', 'dashDot', 'longDash'];
@@ -57,8 +58,11 @@ export function isLine(o) { return LINE_TYPES.has(o.type); }
 
 /** 文字を持てるオブジェクトか（直線・画像・表は図形としての文字を持たない） */
 export function hasText(o) {
-  return !isLine(o) && o.type !== 'image' && o.type !== 'table';
+  return !isLine(o) && o.type !== 'image' && o.type !== 'table' && o.type !== 'chart';
 }
+
+/** 図形としての外形を持たないオブジェクト（図・表・グラフ）。図形の変更などの対象外 */
+export function isFrame(o) { return o.type === 'image' || o.type === 'table' || o.type === 'chart'; }
 
 function defaultTextFont(type) {
   return defaultRunFont({ color: type === 'text' ? '@tx1' : '@bg1' });
@@ -230,7 +234,7 @@ function checkParagraphs(paras) {
 }
 
 function checkObject(o) {
-  const validTypes = new Set(['text', 'table', 'image', ...SHAPE_TYPES]);
+  const validTypes = new Set(['text', 'table', 'image', 'chart', ...SHAPE_TYPES]);
   if (!o || !validTypes.has(o.type)) fail(`不明な図形の種類です: ${o && o.type}`);
   let obj;
   if (Array.isArray(o.paragraphs)) {
@@ -274,6 +278,7 @@ function checkObject(o) {
     if (typeof o.src !== 'string' || !/^data:image\/(png|jpeg|gif|bmp|webp|svg\+xml);base64,/.test(o.src)) fail('画像のデータが不正です');
   }
   if (o.type === 'table') checkTable(obj);
+  if (o.type === 'chart') obj.chart = checkChart(o.chart) || fail('グラフのデータが不正です');
   return obj;
 }
 

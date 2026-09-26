@@ -946,14 +946,14 @@ test('読み込めない内容があれば一覧を表示する', async () => {
   const { buildPptxFiles } = await import('../../src/core/pptx-write.js');
   const { samplePresentation } = await import('../fixtures/sample-pres.js');
   const files = buildPptxFiles(samplePresentation().pres);
-  // グラフの埋め込み（未対応）を 1 つ足す
+  // 壊れたグラフ（参照先が無い）を 1 つ足す
   files['ppt/slides/slide1.xml'] = files['ppt/slides/slide1.xml'].replace('</p:spTree>', '<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="99" name="Chart 1"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="0" y="0"/><a:ext cx="100" cy="100"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"/></a:graphic></p:graphicFrame></p:spTree>');
   const bytes = await writeZip(files);
   const chooser = page.waitForEvent('filechooser');
   await keys('Control+o');
   await (await chooser).setFiles({ name: 'chart.pptx', mimeType: 'application/octet-stream', buffer: Buffer.from(bytes) });
   await page.waitForSelector('.dialog');
-  assert.match(await page.textContent('.dialog'), /グラフ・SmartArt/);
+  assert.match(await page.textContent('.dialog'), /読み込めないグラフ（Chart 1）/);
   await keys('Enter');
 });
 
@@ -1121,4 +1121,52 @@ test('編集中の Alt → 2 は入力中の操作を 1 つだけ戻す', async 
   await keys('Escape');
   const r = await ed(() => __pmg.editor.slide.objects[0].paragraphs[0].runs.map((x) => [x.text, x.font.bold]));
   assert.deepEqual(r, [['AB', false]]);
+});
+
+test('グラフ: Alt → N → C で挿入、Enter でデータの編集、Alt → J → C で種類・要素', async () => {
+  await fresh();
+  await alt('n', 'c');
+  await page.waitForSelector('.list');
+  await keys('Enter'); // 集合縦棒
+  const chart = () => ed(() => __pmg.editor.selectedChart()?.chart);
+  assert.equal((await chart()).kind, 'column');
+  await keys('Enter');
+  await page.waitForSelector('.chart-grid');
+  // 系列 1 の分類 1 を 10 に、分類名を変更、行を追加して値を入れる
+  await page.keyboard.type('10');
+  await keys('ArrowLeft'); // 入力中の ← は左のセル（分類名）へ（Excel と同じ）
+  await page.keyboard.type('東京');
+  await keys('ArrowDown', 'ArrowDown', 'ArrowDown', 'Insert');
+  await keys('Tab');
+  await page.keyboard.type('7');
+  await keys('F2', 'ArrowLeft', 'Delete'); // F2 の編集モードでは ← がセル内の移動: 7 → 7（カーソルは 7 の前、Delete で消す）
+  await page.keyboard.type('8');
+  await keys('Control+Shift+Delete'); // 現在の列（系列 1）を削除
+  await keys('Control+Enter');
+  let c = await chart();
+  assert.deepEqual(c.categories, ['東京', '分類 2', '分類 3', '分類 4', '分類 5']);
+  assert.deepEqual(c.series.map((s) => s.name), ['系列 2', '系列 3']);
+  assert.deepEqual(c.series[0].values, [2.4, 4.4, 1.8, 2.8, null]);
+  // 数値でない値はエラーで閉じない
+  await keys('Enter');
+  await page.waitForSelector('.chart-grid');
+  await page.keyboard.type('abc');
+  await keys('Control+Enter');
+  assert.equal(await page.isVisible('.chart-grid'), true);
+  await keys('Escape');
+  assert.deepEqual((await chart()).series[0].values, [2.4, 4.4, 1.8, 2.8, null], 'キャンセルで変わらない');
+  // 種類の変更・データ ラベル・タイトル
+  await alt('j', 'c', 'c');
+  await page.waitForSelector('.list');
+  await keys('End', 'Enter');
+  await alt('j', 'c', 'a', 'd');
+  await alt('j', 'c', 't');
+  await page.waitForSelector('.dialog input');
+  await page.keyboard.type('売上');
+  await keys('Enter');
+  c = await chart();
+  assert.deepEqual([c.kind, c.dataLabels, c.title, c.showTitle], ['doughnut', true, '売上', true]);
+  await keys('Control+z');
+  assert.equal((await chart()).title, 'グラフ タイトル');
+  assert.deepEqual(errors, []);
 });

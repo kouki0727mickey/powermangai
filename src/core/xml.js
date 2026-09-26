@@ -9,6 +9,7 @@ const KNOWN_NS = {
   'http://schemas.openxmlformats.org/package/2006/content-types': '',
   'http://schemas.microsoft.com/office/powerpoint/2010/main': 'p14',
   'http://schemas.openxmlformats.org/markup-compatibility/2006': 'mc',
+  'http://schemas.openxmlformats.org/drawingml/2006/chart': 'c',
 };
 
 const ENTITIES = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };

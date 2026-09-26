@@ -1,7 +1,11 @@
 // エディター状態と編集コマンド（Undo/Redo 付き）。DOM には依存しない。
 import {
-  clone, createObject, createSlide, createPresentation, newId, bounds, hasText, objText, isLine, allParas, hasTextContent,
+  clone, createObject, createSlide, createPresentation, newId, bounds, hasText, objText, isLine, allParas, hasTextContent, isFrame,
 } from './model.js';
+import { defaultChartData, checkChart } from './chart.js';
+
+/** 回転・反転できるか（PowerPoint と同じく表とグラフはできない） */
+const canRotate = (o) => o.type !== 'table' && o.type !== 'chart';
 import { fitTable, createTable, insertRow, insertColumn, deleteRow, deleteColumn } from './table.js';
 import {
   fromPlainText, applyFontAll, allRunFonts, normalizeParagraph, MAX_LEVEL, pasteFont,
@@ -211,6 +215,28 @@ export class Editor {
     });
   }
 
+  /** グラフの挿入（既定のデータ） */
+  insertChart(kind = 'column') {
+    const w = Math.round(Math.min(640, this.pres.width * 0.7)), h = Math.round(Math.min(380, this.pres.height * 0.7));
+    return this.insertObject('chart', { chart: defaultChartData(kind), w, h, fill: null, stroke: null, name: '' });
+  }
+
+  /** 選択中のグラフ（1 つだけ選択しているとき） */
+  selectedChart() {
+    const objs = this.selectedObjects();
+    return objs.length === 1 && objs[0].type === 'chart' ? objs[0] : null;
+  }
+
+  /** 選択中のグラフの設定・データを変える（patch は chart のプロパティ） */
+  setChart(patch) {
+    const o = this.selectedChart();
+    if (!o) return false;
+    const next = checkChart({ ...o.chart, ...clone(patch) });
+    if (!next) return false;
+    this.mutate(() => { o.chart = next; });
+    return true;
+  }
+
   /** 図の挿入。natural: 画像の元のサイズ（スライドの 8 割に収まるよう縮小） */
   insertImage(src, natural) {
     const maxW = this.pres.width * 0.8, maxH = this.pres.height * 0.8;
@@ -320,7 +346,9 @@ export class Editor {
 
   /** 左右 / 上下反転（axis: 'h' | 'v'） */
   flip(axis) {
+    if (!this.selectedObjects().some(canRotate)) return false;
     return this.updateSelected((o) => {
+      if (!canRotate(o)) return;
       if (axis === 'h') o.flipH = !o.flipH;
       else o.flipV = !o.flipV;
     });
@@ -341,7 +369,7 @@ export class Editor {
 
   /** 図形のスタイル（塗りつぶし・枠線・文字の色の組み合わせ） */
   applyShapeStyle(style) {
-    const objs = this.selectedObjects().filter((o) => !isLine(o) && o.type !== 'image' && o.type !== 'table');
+    const objs = this.selectedObjects().filter((o) => !isLine(o) && !isFrame(o));
     if (objs.length === 0) return false;
     this.mutate(() => {
       for (const o of objs) {
@@ -365,6 +393,7 @@ export class Editor {
       if (o.w < (isLine(o) ? 0 : 1)) o.w = 1;
       if (o.h < (isLine(o) ? 0 : 1)) o.h = 1;
       o.rotation = (((o.rotation % 360) + 360) % 360);
+      if (!canRotate(o)) { o.rotation = 0; o.flipH = false; o.flipV = false; }
     });
   }
 
@@ -390,7 +419,9 @@ export class Editor {
   }
 
   rotate(deg) {
+    if (!this.selectedObjects().some(canRotate)) return false;
     return this.updateSelected((o) => {
+      if (!canRotate(o)) return;
       o.rotation = (((o.rotation + deg) % 360) + 360) % 360;
     });
   }
@@ -783,7 +814,7 @@ export class Editor {
 
   /** 図形の変更（種類だけを変え、位置・書式・文字は保つ） */
   changeShape(type) {
-    return this.setObjectProp('type', type, (o) => !isLine(o) && o.type !== 'image' && o.type !== 'table');
+    return this.setObjectProp('type', type, (o) => !isLine(o) && !isFrame(o));
   }
 
   /** 図形のハイパーリンク（空文字で解除） */

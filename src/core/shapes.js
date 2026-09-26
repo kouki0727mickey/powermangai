@@ -30,6 +30,7 @@ export function buildShape(p, type, w, h) {
     case 'rect':
     case 'image':
     case 'table':
+    case 'chart':
       p.rect(0, 0, w, h);
       break;
     case 'roundRect': {

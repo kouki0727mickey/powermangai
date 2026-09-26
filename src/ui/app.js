@@ -18,7 +18,7 @@ import { isLinkUrl } from '../core/richtext.js';
 import {
   activeDialog, openPalette, openShapeGallery, openGallery, openInput, openList, openConfirm,
   openContent, openHelp, openFontDialog, openSelectionPane, openFormatShape, openTablePicker, openFindReplace, openHeaderFooter,
-  openAnimationPane, h,
+  openAnimationPane, openChartData, h,
 } from './dialogs.js';
 import {
   openPresentationFile, chooseSavePath, writePresentationFile, reportDirty, closeWindow, onSaveAndClose,
@@ -27,6 +27,7 @@ import {
 import { importPptx } from '../core/pptx-read.js';
 import { exportPptx } from '../core/pptx-write.js';
 import { tableLayout, CELL_INSET, cellDisplayFont } from '../core/table.js';
+import { CHART_KINDS, CHART_PALETTES, MAX_CATEGORIES, MAX_SERIES } from '../core/chart.js';
 
 const FONT_FAMILIES = ['+major', '+minor', 'Yu Gothic UI', '游ゴシック', 'メイリオ', 'MS ゴシック', 'MS 明朝', 'BIZ UDPゴシック', 'Arial', 'Segoe UI', 'Times New Roman', 'Consolas'];
 const LINE_SPACINGS = [1, 1.5, 2, 2.5, 3];
@@ -623,6 +624,7 @@ const ACTIONS = {
   // テキスト
   startEdit: () => {
     if (!editor.selection.length) return needSelection();
+    if (editor.selectedChart()) return ACTIONS.chartData();
     return beginEdit() || (setStatus('この図形には文字を入力できません'), false);
   },
   endEdit: () => { commitEdit(); },
@@ -700,11 +702,11 @@ const ACTIONS = {
   shrinkWFine: sel(() => editor.resize(-1, 0)),
   growHFine: sel(() => editor.resize(0, 1)),
   shrinkHFine: sel(() => editor.resize(0, -1)),
-  rotateRight: sel(() => editor.rotate(15)),
-  rotateLeft: sel(() => editor.rotate(-15)),
-  rotateRightFine: sel(() => editor.rotate(1)),
-  rotateLeftFine: sel(() => editor.rotate(-1)),
-  rotateBy: sel((deg) => editor.rotate(deg)),
+  rotateRight: sel(() => editor.rotate(15) || cannotRotate()),
+  rotateLeft: sel(() => editor.rotate(-15) || cannotRotate()),
+  rotateRightFine: sel(() => editor.rotate(1) || cannotRotate()),
+  rotateLeftFine: sel(() => editor.rotate(-1) || cannotRotate()),
+  rotateBy: sel((deg) => editor.rotate(deg) || cannotRotate()),
   group: () => editor.group() || (setStatus('グループ化するには 2 つ以上選択してください（Ctrl+A など）'), false),
   ungroup: () => editor.ungroup() || (setStatus('グループが選択されていません'), false),
   bringToFront: sel(() => editor.reorder('front')),
@@ -791,7 +793,7 @@ const ACTIONS = {
     const v = await openGallery('図形のスタイル', items, { columns: 7 });
     if (v) editor.applyShapeStyle(v) || setStatus('このオブジェクトにはスタイルを適用できません');
   }),
-  flip: sel((axis) => editor.flip(axis)),
+  flip: sel((axis) => editor.flip(axis) || cannotRotate()),
   formatShape: sel(async () => {
     const objs = editor.selectedObjects();
     const o = objs[0];
@@ -843,6 +845,45 @@ const ACTIONS = {
       beginEdit({ cell: { r, c } });
     }
     return ok;
+  },
+  // グラフ
+  insertChart: async () => {
+    const kind = await chooseChartKind('グラフの挿入');
+    if (kind) { commitEdit(); editor.insertChart(kind); setStatus('グラフを挿入しました（Enter でデータの編集）'); }
+  },
+  chartData: async () => {
+    const o = editor.selectedChart();
+    if (!o) return needChart();
+    const r = await openChartData(o.chart, { maxCategories: MAX_CATEGORIES, maxSeries: MAX_SERIES });
+    if (r) editor.setChart(r);
+    return true;
+  },
+  chartType: async () => {
+    const o = editor.selectedChart();
+    if (!o) return needChart();
+    const kind = await chooseChartKind('グラフの種類の変更', o.chart.kind);
+    if (kind) editor.setChart({ kind });
+    return true;
+  },
+  chartToggle: (prop) => {
+    const o = editor.selectedChart();
+    if (!o) return needChart();
+    return editor.setChart({ [prop]: !o.chart[prop] });
+  },
+  chartTitle: async () => {
+    const o = editor.selectedChart();
+    if (!o) return needChart();
+    const v = await openInput('グラフ タイトル', { value: o.chart.title, label: '空にするとタイトルを表示しません' });
+    if (v !== null) editor.setChart({ title: v, showTitle: v !== '' });
+    return true;
+  },
+  chartColors: async () => {
+    const o = editor.selectedChart();
+    if (!o) return needChart();
+    const i = CHART_PALETTES.findIndex((p) => p.id === o.chart.palette);
+    const v = await openList('色の変更', CHART_PALETTES.map((p) => ({ label: p.label, value: p.id })), { initial: Math.max(0, i) });
+    if (v) editor.setChart({ palette: v });
+    return true;
   },
   toggleTableProp: (prop) => {
     const t = editor.selectedTable();
@@ -1316,6 +1357,13 @@ async function inputFontFamily() {
   return v;
 }
 
+const cannotRotate = () => { setStatus('表とグラフは回転・反転できません'); return false; };
+const needChart = () => { setStatus('グラフを選択してください'); return false; };
+async function chooseChartKind(title, current) {
+  const i = CHART_KINDS.findIndex((k) => k.id === current);
+  return openList(title, CHART_KINDS.map((k) => ({ label: k.label, value: k.id })), { initial: Math.max(0, i) });
+}
+
 const CHAR_SPACINGS = [['非常に狭い', -3], ['狭い', -1.5], ['標準', 0], ['広い', 3], ['非常に広い', 6]];
 async function chooseSpacing(current = 0) {
   const i = CHAR_SPACINGS.findIndex(([, v]) => v === (current || 0));
@@ -1408,6 +1456,8 @@ async function runAction(action, args, { keys = '', label = '', repeat = false }
   // 表のセルを編集中だった場合、そのセルを行・列の操作の基準にする
   app.actionCell = editor.editingCell ? { id: editor.editingId, ...editor.editingCell } : null;
   if (editor.editingId && !TEXT_KEEP.has(action)) commitEdit();
+  // グラフを選択しているときの Enter は「データの編集」
+  if (action === 'startEdit' && editor.selectedChart()) label = 'データの編集';
   if (keys) {
     const p = app.practice;
     const entry = p.used.get(label) || { keys, count: 0 };

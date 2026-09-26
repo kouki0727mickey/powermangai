@@ -5,6 +5,7 @@ import { themeOf, resolveFontFamily } from './colors.js';
 import { createSlide, LAYOUTS, isLine, hasText, objText, bounds } from './model.js';
 import { tableLayout } from './table.js';
 import { buildSteps } from './animation.js';
+import { seriesColor, isPieKind, isBarKind, isStacked } from './chart.js';
 
 export const EMU = 12700; // 1pt
 const emu = (v) => Math.round(v * EMU);
@@ -166,6 +167,133 @@ function tableXml(o, id) {
         rows))));
 }
 
+// ---------------------------------------------------------------- グラフ
+const NS_C = 'http://schemas.openxmlformats.org/drawingml/2006/chart';
+
+const BAR_KINDS = new Set(['column', 'stackedColumn', 'bar', 'stackedBar']);
+
+/** 列番号（0 始まり）→ A, B, ..., Z, AA, ... */
+export function colLetter(i) {
+  let s = '';
+  for (let n = i + 1; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
+  return s;
+}
+
+const chartTxPr = (sz, color = '@tx1:0.35') => tag('c:txPr', {}, tag('a:bodyPr'), tag('a:lstStyle'),
+  tag('a:p', {}, tag('a:pPr', {}, tag('a:defRPr', { sz: Math.round(sz * 100) }, fill(color), fontFaces('+minor'))), tag('a:endParaRPr', { lang: 'ja-JP' })));
+const lineSpPr = (color, w = 0.75) => tag('c:spPr', {}, tag('a:ln', { w: emu(w) }, color ? fill(color) : tag('a:noFill')));
+
+/** グラフの XML と、埋め込むワークシート（.xlsx の中身） */
+function chartParts(o) {
+  const ch = o.chart;
+  const nCat = ch.categories.length;
+  const pie = isPieKind(ch.kind);
+  const series = pie ? ch.series.slice(0, 1) : ch.series;
+  const catRef = `Sheet1!$A$2:$A$${nCat + 1}`;
+  const strCache = (vals) => tag('c:strCache', {}, tag('c:ptCount', { val: vals.length }), vals.map((v, i) => tag('c:pt', { idx: i }, tag('c:v', {}, esc(v)))));
+  const dLbls = (color) => tag('c:dLbls', {}, tag('c:spPr', {}, tag('a:noFill'), tag('a:ln', {}, tag('a:noFill'))), chartTxPr(12, color),
+    tag('c:showLegendKey', { val: 0 }), tag('c:showVal', { val: 1 }), tag('c:showCatName', { val: 0 }), tag('c:showSerName', { val: 0 }), tag('c:showPercent', { val: 0 }), tag('c:showBubbleSize', { val: 0 }));
+  const stacked = isStacked(ch.kind);
+  const serXml = (s, i) => {
+    const col = colLetter(i + 1);
+    const color = seriesColor(ch.palette, i);
+    const line = ch.kind === 'line' || ch.kind === 'lineMarkers';
+    const spPr = line
+      ? tag('c:spPr', {}, tag('a:ln', { w: emu(2.25), cap: 'rnd' }, fill(color), tag('a:round')))
+      : tag('c:spPr', {}, pie ? '' : fill(color), pie ? tag('a:ln', { w: emu(1) }, fill('@bg1')) : tag('a:ln', {}, tag('a:noFill')));
+    const dPts = pie ? ch.categories.map((_, k) => tag('c:dPt', {}, tag('c:idx', { val: k }), tag('c:bubble3D', { val: 0 }),
+      tag('c:spPr', {}, fill(seriesColor(ch.palette, k)), tag('a:ln', { w: emu(1) }, fill('@bg1'))))) : '';
+    const marker = line ? (ch.kind === 'lineMarkers'
+      ? tag('c:marker', {}, tag('c:symbol', { val: 'circle' }), tag('c:size', { val: 5 }), tag('c:spPr', {}, fill(color), tag('a:ln', { w: emu(0.75) }, fill(color))))
+      : tag('c:marker', {}, tag('c:symbol', { val: 'none' }))) : '';
+    const vals = s.values;
+    return tag('c:ser', {},
+      tag('c:idx', { val: i }), tag('c:order', { val: i }),
+      tag('c:tx', {}, tag('c:strRef', {}, tag('c:f', {}, `Sheet1!$${col}$1`), strCache([s.name]))),
+      spPr,
+      BAR_KINDS.has(ch.kind) ? tag('c:invertIfNegative', { val: 0 }) : '',
+      marker, dPts,
+      ch.dataLabels ? dLbls(pie || stacked ? '@bg1' : '@tx1:0.25') : '',
+      tag('c:cat', {}, tag('c:strRef', {}, tag('c:f', {}, catRef), strCache(ch.categories))),
+      tag('c:val', {}, tag('c:numRef', {}, tag('c:f', {}, `Sheet1!$${col}$2:$${col}$${nCat + 1}`),
+        tag('c:numCache', {}, tag('c:formatCode', {}, 'General'), tag('c:ptCount', { val: nCat }),
+          vals.map((v, k) => (v === null ? '' : tag('c:pt', { idx: k }, tag('c:v', {}, String(v)))))))),
+      line ? tag('c:smooth', { val: 0 }) : '');
+  };
+  const axIds = tag('c:axId', { val: 500000001 }) + tag('c:axId', { val: 500000002 });
+  let plot;
+  if (pie) {
+    plot = tag(ch.kind === 'doughnut' ? 'c:doughnutChart' : 'c:pieChart', {}, tag('c:varyColors', { val: 1 }), series.map(serXml),
+      tag('c:firstSliceAng', { val: 0 }), ch.kind === 'doughnut' ? tag('c:holeSize', { val: 50 }) : '');
+  } else {
+    const horizontal = isBarKind(ch.kind);
+    let chartEl;
+    if (ch.kind === 'line' || ch.kind === 'lineMarkers') {
+      chartEl = tag('c:lineChart', {}, tag('c:grouping', { val: 'standard' }), tag('c:varyColors', { val: 0 }), series.map(serXml), tag('c:marker', { val: 1 }), axIds);
+    } else if (ch.kind === 'area') {
+      chartEl = tag('c:areaChart', {}, tag('c:grouping', { val: 'standard' }), tag('c:varyColors', { val: 0 }), series.map(serXml), axIds);
+    } else {
+      chartEl = tag('c:barChart', {}, tag('c:barDir', { val: horizontal ? 'bar' : 'col' }), tag('c:grouping', { val: stacked ? 'stacked' : 'clustered' }),
+        tag('c:varyColors', { val: 0 }), series.map(serXml), tag('c:gapWidth', { val: stacked ? 150 : 219 }), tag('c:overlap', { val: stacked ? 100 : -27 }), axIds);
+    }
+    const catAx = tag('c:catAx', {}, tag('c:axId', { val: 500000001 }), tag('c:scaling', {}, tag('c:orientation', { val: 'minMax' })), tag('c:delete', { val: 0 }),
+      tag('c:axPos', { val: horizontal ? 'l' : 'b' }), tag('c:numFmt', { formatCode: 'General', sourceLinked: 1 }),
+      tag('c:majorTickMark', { val: 'none' }), tag('c:minorTickMark', { val: 'none' }), tag('c:tickLblPos', { val: 'nextTo' }),
+      lineSpPr('@tx1:0.85'), chartTxPr(12), tag('c:crossAx', { val: 500000002 }), tag('c:crosses', { val: 'autoZero' }),
+      tag('c:auto', { val: 1 }), tag('c:lblAlgn', { val: 'ctr' }), tag('c:lblOffset', { val: 100 }), tag('c:noMultiLvlLbl', { val: 0 }));
+    const valAx = tag('c:valAx', {}, tag('c:axId', { val: 500000002 }), tag('c:scaling', {}, tag('c:orientation', { val: 'minMax' })), tag('c:delete', { val: 0 }),
+      tag('c:axPos', { val: horizontal ? 'b' : 'l' }), ch.gridlines ? tag('c:majorGridlines', {}, lineSpPr('@tx1:0.85')) : '',
+      tag('c:numFmt', { formatCode: 'General', sourceLinked: 1 }), tag('c:majorTickMark', { val: 'none' }), tag('c:minorTickMark', { val: 'none' }),
+      tag('c:tickLblPos', { val: 'nextTo' }), lineSpPr(null), chartTxPr(12), tag('c:crossAx', { val: 500000001 }), tag('c:crosses', { val: 'autoZero' }),
+      tag('c:crossBetween', { val: 'between' }));
+    plot = chartEl + catAx + valAx;
+  }
+  const title = ch.showTitle && ch.title
+    ? tag('c:title', {}, tag('c:tx', {}, tag('c:rich', {}, tag('a:bodyPr'), tag('a:lstStyle'),
+      tag('a:p', {}, tag('a:pPr', {}, tag('a:defRPr', { sz: 1862 }, fill('@tx1:0.35'), fontFaces('+minor'))), tag('a:r', {}, tag('a:rPr', { lang: 'ja-JP', altLang: 'en-US', sz: 1862 }), tag('a:t', {}, esc(ch.title)))))),
+    tag('c:overlay', { val: 0 })) + tag('c:autoTitleDeleted', { val: 0 })
+    : tag('c:autoTitleDeleted', { val: 1 });
+  const xml = XML_HEAD + tag('c:chartSpace', { 'xmlns:c': NS_C, 'xmlns:a': NS.a, 'xmlns:r': NS.r },
+    tag('c:date1904', { val: 0 }), tag('c:lang', { val: 'ja-JP' }), tag('c:roundedCorners', { val: 0 }),
+    tag('c:chart', {}, title,
+      tag('c:plotArea', {}, tag('c:layout'), plot),
+      ch.showLegend ? tag('c:legend', {}, tag('c:legendPos', { val: 'b' }), tag('c:overlay', { val: 0 }), chartTxPr(12)) : '',
+      tag('c:plotVisOnly', { val: 1 }), tag('c:dispBlanksAs', { val: 'gap' })),
+    tag('c:spPr', {}, fill(o.fill), tag('a:ln', {}, o.stroke && o.strokeWidth > 0 ? fill(o.stroke) : tag('a:noFill'))),
+    chartTxPr(12),
+    tag('c:externalData', { 'r:id': 'rId1' }, tag('c:autoUpdate', { val: 0 })));
+  return { xml, sheet: chartSheetFiles(ch, series) };
+}
+
+/** グラフのデータを入れた最小限のワークシート（PowerPoint の「データの編集」用） */
+function chartSheetFiles(ch, series) {
+  const S = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+  const str = (ref, v) => tag('c', { r: ref, t: 'inlineStr' }, tag('is', {}, tag('t', {}, esc(v))));
+  const rows = [tag('row', { r: 1 }, series.map((s, i) => str(`${colLetter(i + 1)}1`, s.name)))];
+  ch.categories.forEach((cat, k) => {
+    const r = k + 2;
+    rows.push(tag('row', { r }, str(`A${r}`, cat), series.map((s, i) => (s.values[k] === null ? '' : tag('c', { r: `${colLetter(i + 1)}${r}` }, tag('v', {}, String(s.values[k])))))));
+  });
+  return {
+    '[Content_Types].xml': XML_HEAD + tag('Types', { xmlns: 'http://schemas.openxmlformats.org/package/2006/content-types' },
+      tag('Default', { Extension: 'rels', ContentType: 'application/vnd.openxmlformats-package.relationships+xml' }),
+      tag('Default', { Extension: 'xml', ContentType: 'application/xml' }),
+      tag('Override', { PartName: '/xl/workbook.xml', ContentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml' }),
+      tag('Override', { PartName: '/xl/worksheets/sheet1.xml', ContentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml' })),
+    '_rels/.rels': relsXml([['rId1', 'officeDocument', 'xl/workbook.xml']]),
+    'xl/workbook.xml': XML_HEAD + tag('workbook', { xmlns: S, 'xmlns:r': NS.r }, tag('sheets', {}, tag('sheet', { name: 'Sheet1', sheetId: 1, 'r:id': 'rId1' }))),
+    'xl/_rels/workbook.xml.rels': relsXml([['rId1', 'worksheet', 'worksheets/sheet1.xml']]),
+    'xl/worksheets/sheet1.xml': XML_HEAD + tag('worksheet', { xmlns: S }, tag('sheetData', {}, rows)),
+  };
+}
+
+function chartFrameXml(o, id, rid) {
+  return tag('p:graphicFrame', {},
+    tag('p:nvGraphicFramePr', {}, cNvPr(o, id, o.name || `Chart ${id}`), tag('p:cNvGraphicFramePr', {}, tag('a:graphicFrameLocks', { noGrp: 1 })), tag('p:nvPr')),
+    tag('p:xfrm', {}, tag('a:off', { x: emu(o.x), y: emu(o.y) }), tag('a:ext', { cx: emu(o.w), cy: emu(o.h) })),
+    tag('a:graphic', {}, tag('a:graphicData', { uri: NS_C }, tag('c:chart', { 'xmlns:c': NS_C, 'r:id': rid }))));
+}
+
 function spTreeStart() {
   return tag('p:nvGrpSpPr', {}, tag('p:cNvPr', { id: 1, name: '' }), tag('p:cNvGrpSpPr'), tag('p:nvPr'))
     + tag('p:grpSpPr', {}, tag('a:xfrm', {}, tag('a:off', { x: 0, y: 0 }), tag('a:ext', { cx: 0, cy: 0 }), tag('a:chOff', { x: 0, y: 0 }), tag('a:chExt', { cx: 0, cy: 0 })));
@@ -318,6 +446,7 @@ function slideXmlInner(pres, slide, index, rels) {
       return picXml(o, id, rels.image(img));
     }
     if (o.type === 'table') return tableXml(o, id);
+    if (o.type === 'chart') return chartFrameXml(o, id, rels.chart(o));
     if (!isLine(o)) textSpids.add(id);
     return spXml(o, id, ctx);
   };
@@ -473,6 +602,7 @@ export function buildPptxFiles(pres, { title = '' } = {}) {
   const mediaExts = new Set();
   const layoutIds = LAYOUTS.map((l) => l.id);
   const hasNotes = pres.slides.some((s) => s.notes && s.notes.trim());
+  let chartCount = 0;
 
   pres.slides.forEach((slide, i) => {
     const n = i + 1;
@@ -495,7 +625,18 @@ export function buildPptxFiles(pres, { title = '' } = {}) {
       }
       return links.get(url);
     };
-    files[`ppt/slides/slide${n}.xml`] = slideXml(pres, slide, i, { image: imageRel, link: linkRelFn });
+    const chartRel = (o) => {
+      const k = ++chartCount;
+      const { xml, sheet } = chartParts(o);
+      files[`ppt/charts/chart${k}.xml`] = xml;
+      files[`ppt/charts/_rels/chart${k}.xml.rels`] = relsXml([['rId1', 'package', `../embeddings/Microsoft_Excel_Worksheet${k}.xlsx`]]);
+      files[`ppt/embeddings/Microsoft_Excel_Worksheet${k}.xlsx`] = { zip: sheet };
+      overrides.push([`/ppt/charts/chart${k}.xml`, 'application/vnd.openxmlformats-officedocument.drawingml.chart+xml']);
+      const id = `rId${rels.length + 1}`;
+      rels.push([id, 'chart', `../charts/chart${k}.xml`]);
+      return id;
+    };
+    files[`ppt/slides/slide${n}.xml`] = slideXml(pres, slide, i, { image: imageRel, link: linkRelFn, chart: chartRel });
     if (hasNotes && slide.notes && slide.notes.trim()) {
       rels.push([`rId${rels.length + 1}`, 'notesSlide', `../notesSlides/notesSlide${n}.xml`]);
       files[`ppt/notesSlides/notesSlide${n}.xml`] = notesSlideXml(slide.notes);
@@ -578,6 +719,7 @@ export function buildPptxFiles(pres, { title = '' } = {}) {
     tag('Default', { Extension: 'rels', ContentType: 'application/vnd.openxmlformats-package.relationships+xml' }),
     tag('Default', { Extension: 'xml', ContentType: 'application/xml' }),
     [...mediaExts].map((ext) => tag('Default', { Extension: ext, ContentType: mimeOf[ext] })),
+    chartCount ? tag('Default', { Extension: 'xlsx', ContentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }) : '',
     overrides.map(([part, ct]) => tag('Override', { PartName: part, ContentType: ct })));
   return files;
 }

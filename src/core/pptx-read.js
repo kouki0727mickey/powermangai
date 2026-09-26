@@ -484,7 +484,10 @@ class SlideReader {
     const data = xpath(el, 'a:graphic/a:graphicData');
     const tbl = kid(data, 'a:tbl');
     const cNvPr = xpath(el, 'p:nvGraphicFramePr/p:cNvPr');
-    if (!tbl) { this.ctx.warn(`グラフ・SmartArt などの埋め込みオブジェクト（${cNvPr?.attrs.name || ''}）`); return; }
+    const chartRef = kid(data, 'c:chart');
+    if (chartRef) { this.readChartFrame(el, chartRef, cNvPr, transform, groupId, out); return; }
+    if (data?.attrs.uri === 'http://schemas.openxmlformats.org/drawingml/2006/chart') { this.ctx.warn(`読み込めないグラフ（${cNvPr?.attrs.name || ''}）`); return; }
+    if (!tbl) { this.ctx.warn(`SmartArt などの埋め込みオブジェクト（${cNvPr?.attrs.name || ''}）`); return; }
     const x = kid(el, 'p:xfrm');
     const geo = this.geometry(x, transform);
     if (!geo) return;
@@ -508,6 +511,100 @@ class SlideReader {
     this.spIdMap.set(cNvPr?.attrs.id, obj.id);
     out.push(obj);
   }
+
+  readChartFrame(el, chartRef, cNvPr, transform, groupId, out) {
+    const geo = this.geometry(kid(el, 'p:xfrm'), transform);
+    const path = this.rels[chartRef.attrs['r:id']]?.target;
+    const cs = this.pkg.xml(path);
+    const chart = cs && readChart(cs, this.theme, this.ctx.warn);
+    if (!geo || !chart) { this.ctx.warn(`読み込めないグラフ（${cNvPr?.attrs.name || ''}）`); return; }
+    const spPr = kid(cs, 'c:spPr');
+    const f = readFill(spPr, this.theme);
+    const lnEl = kid(spPr, 'a:ln');
+    const ln = lnEl ? readFill(lnEl, this.theme) : null;
+    const link = this.linkOf(cNvPr);
+    const obj = createObject('chart', {
+      ...geo, name: cNvPr?.attrs.name || '', hidden: cNvPr?.attrs.hidden === '1', groupId: groupId || null,
+      ...(link ? { link } : {}), ...(cNvPr?.attrs.descr ? { alt: cNvPr.attrs.descr } : {}),
+      fill: f ? f.value : null, stroke: ln ? ln.value : null, strokeWidth: lnEl?.attrs.w ? pt(lnEl.attrs.w) : 0.75, chart,
+    });
+    this.spIdMap.set(cNvPr?.attrs.id, obj.id);
+    out.push(obj);
+  }
+}
+
+// ---------------------------------------------------------------- グラフ
+const CHART_TYPES = {
+  'c:barChart': 'bar', 'c:bar3DChart': 'bar', 'c:lineChart': 'line', 'c:line3DChart': 'line', 'c:areaChart': 'area', 'c:area3DChart': 'area',
+  'c:pieChart': 'pie', 'c:pie3DChart': 'pie', 'c:ofPieChart': 'pie', 'c:doughnutChart': 'doughnut',
+};
+
+/** 文字列・数値のキャッシュ → idx 順の配列 */
+function cachePoints(ref) {
+  const cache = ref && (xpath(ref, 'c:strRef/c:strCache') || xpath(ref, 'c:numRef/c:numCache') || xpath(ref, 'c:strLit') || xpath(ref, 'c:numLit')
+    || xpath(ref, 'c:multiLvlStrRef/c:multiLvlStrCache/c:lvl'));
+  if (!cache) return [];
+  const count = Math.min(1000, Number(kid(cache, 'c:ptCount')?.attrs.val) || 0);
+  const out = new Array(count).fill(null);
+  for (const p of kids(cache, 'c:pt')) {
+    const i = Number(p.attrs.idx);
+    if (Number.isInteger(i) && i >= 0 && i < 1000) out[i] = textOf(kid(p, 'c:v'));
+  }
+  return out;
+}
+
+/** c:chartSpace → グラフのデータ（対応していない種類は null） */
+export function readChart(cs, theme, warn = () => {}) {
+  const chart = kid(cs, 'c:chart');
+  const plotArea = kid(chart, 'c:plotArea');
+  const types = kids(plotArea).filter((e) => e.name.endsWith('Chart'));
+  const typeEl = types.find((e) => CHART_TYPES[e.name]);
+  if (!typeEl) return null;
+  if (types.length > 1) warn('複合グラフ（最初の種類だけを読み込みました）');
+  if (/3D/.test(typeEl.name)) warn('3-D グラフ（平面のグラフとして読み込みました）');
+  const base = CHART_TYPES[typeEl.name];
+  const grouping = kid(typeEl, 'c:grouping')?.attrs.val || 'clustered';
+  if (grouping === 'percentStacked') warn('100% 積み上げグラフ（積み上げとして読み込みました）');
+  const sers = kids(typeEl, 'c:ser');
+  if (!sers.length) return null;
+  let kind = base;
+  if (base === 'bar') {
+    const horizontal = kid(typeEl, 'c:barDir')?.attrs.val === 'bar';
+    const stacked = grouping === 'stacked' || grouping === 'percentStacked';
+    kind = horizontal ? (stacked ? 'stackedBar' : 'bar') : (stacked ? 'stackedColumn' : 'column');
+  } else if (base === 'line') {
+    // 系列に c:marker が無ければ自動（表示）。symbol=none なら非表示
+    const markers = sers.some((s) => { const m = xpath(s, 'c:marker/c:symbol'); return !m || m.attrs.val !== 'none'; });
+    kind = markers && kid(typeEl, 'c:marker')?.attrs.val !== '0' ? 'lineMarkers' : 'line';
+  } else if (base === 'area' && grouping !== 'standard') warn('積み上げ面グラフ（面グラフとして読み込みました）');
+  const catPts = cachePoints(kid(sers[0], 'c:cat'));
+  const valPts = sers.map((s) => cachePoints(kid(s, 'c:val')));
+  const nCat = Math.max(catPts.length, ...valPts.map((v) => v.length));
+  if (!nCat) return null;
+  const categories = Array.from({ length: nCat }, (_, i) => catPts[i] ?? '');
+  const series = sers.map((s, i) => {
+    const tx = kid(s, 'c:tx');
+    const name = tx ? (cachePoints(tx)[0] ?? textOf(kid(tx, 'c:v'))) : `系列 ${i + 1}`;
+    return { name: name ?? '', values: categories.map((_, k) => { const v = valPts[i][k]; const n = v === null || v === '' ? NaN : Number(v); return Number.isFinite(n) ? n : null; }) };
+  });
+  // タイトル: 文字の指定が無ければ、系列が 1 つのときは系列名（PowerPoint と同じ）
+  const titleEl = kid(chart, 'c:title');
+  const deleted = kid(chart, 'c:autoTitleDeleted')?.attrs.val;
+  const rich = xpath(titleEl, 'c:tx/c:rich');
+  let title = rich ? kids(rich, 'a:p').map((p) => textOf(p)).join('\n') : '';
+  if (titleEl && !rich) title = series.length === 1 ? series[0].name : 'グラフ タイトル';
+  const showTitle = !!titleEl && deleted !== '1' && deleted !== 'true';
+  const showVal = (el) => xpath(el, 'c:dLbls/c:showVal')?.attrs.val === '1';
+  return {
+    kind, categories, series,
+    title: title || (series.length === 1 ? series[0].name : 'グラフ タイトル'),
+    showTitle,
+    showLegend: !!kid(chart, 'c:legend'),
+    dataLabels: showVal(typeEl) || sers.some(showVal),
+    // 円グラフには軸が無いので既定（表示）のまま
+    gridlines: kids(plotArea, 'c:valAx').length ? kids(plotArea, 'c:valAx').some((a) => !!kid(a, 'c:majorGridlines')) : true,
+    palette: 'colorful',
+  };
 }
 
 function cleanFont(f) {
