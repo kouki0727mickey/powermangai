@@ -33,6 +33,7 @@ export const BINDINGS = [
   { action: 'selectPrev', keys: ['Shift+Tab'], contexts: E, category: '選択', label: '前のオブジェクトを選択' },
   { action: 'escape', keys: ['Escape'], contexts: [...ES, 'notes'], category: '選択', label: '選択解除 / ノートから編集領域へ' },
   { action: 'find', keys: ['Ctrl+F'], contexts: ALL, category: '編集', label: '検索' },
+  { action: 'newComment', keys: ['Ctrl+Alt+M'], contexts: ALL, category: '校閲', label: '新しいコメント' },
   { action: 'replace', keys: ['Ctrl+H'], contexts: ALL, category: '編集', label: '置換' },
   { action: 'delete', keys: ['Delete', 'Backspace'], contexts: ES, category: '編集', label: '削除（オブジェクト / スライド）' },
 

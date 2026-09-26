@@ -2,7 +2,7 @@
 import { Editor } from '../core/editor.js';
 import {
   SHAPE_TYPES, SHAPE_LABELS, LAYOUTS, createPresentation, createSlide, normalizePresentation, hasText, objFont, objText,
-  isLine, displayName, shapeStyles, LINE_WEIGHTS, createObject, allParas, hasTextContent, SLIDE_SIZES,
+  isLine, displayName, shapeStyles, LINE_WEIGHTS, createObject, allParas, hasTextContent, SLIDE_SIZES, commentAnchor,
 } from '../core/model.js';
 import { findTheme, THEMES } from '../core/colors.js';
 import { findAll, compareMatchPos } from '../core/search.js';
@@ -12,13 +12,13 @@ import { BINDINGS, MOVE_STEP, bindingsByCategory } from '../core/shortcuts.js';
 import { KeyTipSession, KEYTIPS, keyTipPaths } from '../core/keytips.js';
 import { CHALLENGES } from '../core/challenges.js';
 import { scorePresentation, imageSimilarity } from '../core/scoring.js';
-import { drawSlide, drawSelection, drawObject, slideToDataUrl, measureText, setImageLoadCallback } from './render.js';
+import { drawSlide, drawSelection, drawObject, slideToDataUrl, measureText, setImageLoadCallback, drawCommentMarkers } from './render.js';
 import { RichEditor } from './richeditor.js';
 import { isLinkUrl } from '../core/richtext.js';
 import {
   activeDialog, openPalette, openShapeGallery, openGallery, openInput, openList, openConfirm,
   openContent, openHelp, openFontDialog, openSelectionPane, openFormatShape, openTablePicker, openFindReplace, openHeaderFooter,
-  openAnimationPane, openChartData, h,
+  openAnimationPane, openChartData, openCommentsPane, h,
 } from './dialogs.js';
 import {
   openPresentationFile, chooseSavePath, writePresentationFile, reportDirty, closeWindow, onSaveAndClose,
@@ -51,7 +51,19 @@ const app = {
   guides: false,
   findMatch: null,
   findState: null,
+  showComments: true, // スライド上のコメントのマーカー
+  activeComment: null,
 };
+
+// ---- コメントの作成者（このコンピューターに保存）
+function commentAuthor() {
+  try { return localStorage.getItem('pmg.author') || 'ユーザー'; } catch { return 'ユーザー'; }
+}
+function initials(name) {
+  const words = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '';
+  return words.length > 1 ? (words[0][0] + words[1][0]).toUpperCase() : Array.from(words[0])[0].toUpperCase();
+}
 
 function newPractice(mode, extra = {}) {
   return {
@@ -147,6 +159,12 @@ function render() {
   drawSelection(overlay.getContext('2d'), slide, editor.selection, overlay.width, overlay.height, {
     editingId: editor.editingId, size: editor.size, cellRect: view, grid: app.grid ? 28.35 : 0, guides: app.guides,
   });
+  if (app.showComments && slide.comments?.length) {
+    const markers = slide.comments.map((c, i) => ({
+      ...commentAnchor(slide, c, editor.size), label: `${initials(c.author)}${i + 1}`, active: c.id === app.activeComment, resolved: c.resolved,
+    }));
+    drawCommentMarkers(overlay.getContext('2d'), markers, overlay.width, overlay.height, editor.size, window.devicePixelRatio || 1);
+  }
   if (app.view === 'sorter') renderSorter();
   renderNotes();
   scrollSelectionIntoView();
@@ -935,6 +953,30 @@ const ACTIONS = {
     return true;
   },
 
+  // コメント
+  newComment: () => openComments({ start: 'new' }),
+  commentsPane: () => openComments(),
+  nextComment: () => jumpComment(1),
+  prevComment: () => jumpComment(-1),
+  deleteComment: () => {
+    // 選択中の図形に付いたコメント、無ければスライドの最初のコメント
+    const list = editor.slide.comments || [];
+    const c = list.find((x) => x.id === app.lastComment) || list.find((x) => editor.selection.includes(x.target)) || list[0];
+    if (!c) { setStatus('このスライドにはコメントがありません'); return false; }
+    editor.deleteComment(c.id);
+    setStatus('コメントを削除しました');
+    return true;
+  },
+  deleteAllComments: (all) => editor.deleteAllComments(all) || (setStatus('削除するコメントがありません'), false),
+  toggleCommentMarkers: () => { app.showComments = !app.showComments; setStatus(app.showComments ? 'コメントを表示します' : 'コメントを表示しません'); render(); return true; },
+  setAuthor: async () => {
+    const v = await openInput('ユーザー名', { value: commentAuthor(), label: 'コメントに表示する名前', validate: (x) => (x ? null : '名前を入力してください') });
+    if (v === null) return false;
+    try { localStorage.setItem('pmg.author', v); } catch { /* 保存できなくても今回は使う */ }
+    app.authorOverride = v;
+    return true;
+  },
+
   // グラフ
   insertChart: async () => {
     const kind = await chooseChartKind('グラフの挿入');
@@ -1449,6 +1491,39 @@ async function inputFontFamily() {
 }
 
 const cannotRotate = () => { setStatus('表とグラフは回転・反転できません'); return false; };
+/** コメント ウィンドウを開く */
+async function openComments(opts = {}) {
+  commitEdit();
+  const author = () => app.authorOverride || commentAuthor();
+  await openCommentsPane({
+    list: () => editor.slide.comments || [],
+    title: () => `スライド ${editor.slideIndex + 1} のコメント（${(editor.slide.comments || []).length} 件）／ 名前: ${author()}`,
+    add: (text) => { const c = editor.addComment(text, author()); app.lastComment = c.id; },
+    reply: (id, text) => editor.replyComment(id, text, author()),
+    edit: (id, text, replyId) => editor.editComment(id, text, replyId),
+    remove: (id, replyId) => editor.deleteComment(id, replyId),
+    toggleResolved: (id) => editor.toggleCommentResolved(id),
+    jump: (dir, id) => {
+      const next = editor.adjacentComment(dir, id);
+      if (!next) { setStatus('コメントはありません'); return null; }
+      if (next.slideIndex !== editor.slideIndex) editor.gotoSlide(next.slideIndex);
+      return next.id;
+    },
+    setActive: (id) => { app.activeComment = id; if (id) app.lastComment = id; render(); },
+  }, opts);
+  render();
+  return true;
+}
+
+/** 次 / 前のコメントへ移り、コメント ウィンドウで選ぶ */
+function jumpComment(dir) {
+  const next = editor.adjacentComment(dir, app.lastComment && editor.findComment(app.lastComment) ? app.lastComment : null);
+  if (!next) { setStatus('コメントはありません'); return false; }
+  commitEdit();
+  if (next.slideIndex !== editor.slideIndex) editor.gotoSlide(next.slideIndex);
+  return openComments({ focusId: next.id });
+}
+
 const needSection = () => { setStatus('セクションがありません（Alt → H → T → 1 → A で追加）'); return false; };
 const needChart = () => { setStatus('グラフを選択してください'); return false; };
 async function chooseChartKind(title, current) {

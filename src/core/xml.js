@@ -10,6 +10,8 @@ const KNOWN_NS = {
   'http://schemas.microsoft.com/office/powerpoint/2010/main': 'p14',
   'http://schemas.openxmlformats.org/markup-compatibility/2006': 'mc',
   'http://schemas.openxmlformats.org/drawingml/2006/chart': 'c',
+  'http://schemas.microsoft.com/office/powerpoint/2012/main': 'p15',
+  'http://schemas.microsoft.com/office/powerpoint/2018/8/main': 'p188',
 };
 
 const ENTITIES = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };

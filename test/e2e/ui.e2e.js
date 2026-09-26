@@ -1231,3 +1231,47 @@ test('末尾の空のセクションもスライド一覧に表示される', as
   const names = await page.$$eval('#thumbs .section-head:not([hidden]) .section-name', (els) => els.map((e) => e.textContent));
   assert.deepEqual(names, ['既定のセクション（2）', 'タイトルなしのセクション（0）']);
 });
+
+test('コメント: Ctrl+Alt+M で追加、返信・編集・解決・削除、Alt → R → N で次のコメント', async () => {
+  await fresh();
+  await ed(() => { try { localStorage.setItem('pmg.author', 'Taro Yamada'); } catch { /* */ } });
+  await keys('Tab'); // タイトルを選択 → 図形に付けたコメント
+  await keys('Control+Alt+m');
+  await page.waitForSelector('.comment textarea');
+  await page.keyboard.type('タイトルを短く');
+  await keys('Enter');
+  await page.keyboard.type('2 行目');
+  await keys('Control+Enter');
+  const comments = () => ed(() => __pmg.editor.pres.slides.map((s) => s.comments.map((c) => ({ author: c.author, text: c.text, target: !!c.target, resolved: c.resolved, replies: c.replies.map((r) => r.text) }))));
+  assert.deepEqual(await comments(), [[{ author: 'Taro Yamada', text: 'タイトルを短く\n2 行目', target: true, resolved: false, replies: [] }]]);
+  // 返信・編集・解決
+  await keys('r');
+  await page.keyboard.type('了解');
+  await keys('Control+Enter', 'ArrowUp', 'e', 'Control+a');
+  await page.keyboard.type('短く');
+  await keys('Control+Enter', ' ');
+  assert.deepEqual(await comments(), [[{ author: 'Taro Yamada', text: '短く', target: true, resolved: true, replies: ['了解'] }]]);
+  // スライド上にマーカー（イニシャル + 番号）
+  assert.equal(await ed(() => __pmg.app.activeComment !== null), true);
+  await keys('Escape');
+  // 2 枚目にもコメントを付け、Alt → R → N / V で行き来する
+  await keys('Control+m');
+  await alt('r', 'c');
+  await page.waitForSelector('.comment textarea');
+  await page.keyboard.type('図を追加');
+  await keys('Control+Enter', 'Escape');
+  await alt('r', 'n');
+  await page.waitForSelector('.comments');
+  assert.equal(await ed(() => __pmg.editor.slideIndex), 0, '最後の次は最初のコメント');
+  await keys('PageDown');
+  assert.equal(await ed(() => __pmg.editor.slideIndex), 1);
+  assert.match(await page.textContent('.comments'), /図を追加/);
+  await keys('Delete');
+  assert.deepEqual((await comments())[1], []);
+  await keys('Escape', 'Control+z');
+  assert.equal((await comments())[1].length, 1, '削除も元に戻せる');
+  // すべて削除（Alt → R → D → P）
+  await alt('r', 'd', 'p');
+  assert.deepEqual(await comments(), [[], []]);
+  assert.deepEqual(errors, []);
+});

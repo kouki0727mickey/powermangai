@@ -919,3 +919,107 @@ export function openChartData(chart, { maxCategories = 100, maxSeries = 50 } = {
   build();
   return d.show();
 }
+
+// ---------------------------------------------------------------- コメント
+/**
+ * コメント ウィンドウ（右側）。api:
+ *   list() → [{ id, author, date, text, resolved, replies: [{ id, author, date, text }] }]（現在のスライド）
+ *   title() → 見出し（スライド番号など）
+ *   add(text) / reply(id, text) / edit(id, text, replyId) / remove(id, replyId) / toggleResolved(id)
+ *   jump(dir, id) → 次 / 前のコメントの id（スライドを移る）。無ければ null
+ *   setActive(id) → スライド上のマーカーを強調
+ * start: 'new' なら新しいコメントの入力から始める。focusId: 最初に選ぶコメント
+ */
+export function openCommentsPane(api, { start = null, focusId = null } = {}) {
+  const d = new Dialog('コメント',
+    '↑↓: 移動 ／ N: 新しいコメント ／ R: 返信 ／ E・F2: 編集 ／ Delete: 削除 ／ Space: 解決 / 再開 ／ PageDown / PageUp: 次 / 前のコメント ／ Esc: 閉じる（入力中は Ctrl+Enter: 投稿、Esc: 取り消し）',
+    { side: true });
+  const head = h('div', { class: 'comments-head' });
+  const box = h('div', { class: 'comments' });
+  d.body.append(head, box);
+  let sel = 0;
+  let compose = null; // { mode: 'new' | 'reply' | 'edit', id, replyId, area }
+  const fmtDate = (s) => { const t = new Date(s); return Number.isNaN(t.getTime()) ? '' : t.toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'short' }); };
+  const flat = () => api.list().flatMap((c) => [{ c }, ...c.replies.map((r) => ({ c, r }))]);
+  const render = () => {
+    const items = flat();
+    sel = Math.max(0, Math.min(items.length - 1, sel));
+    head.textContent = api.title();
+    box.textContent = '';
+    if (!items.length && !compose) box.append(h('div', { class: 'comment-empty', text: 'このスライドにはコメントがありません（N で追加）' }));
+    items.forEach((it, i) => {
+      const x = it.r || it.c;
+      const editing = compose && compose.mode === 'edit' && compose.id === it.c.id && (compose.replyId || null) === (it.r ? it.r.id : null);
+      const el = h('div', { class: `comment${it.r ? ' reply' : ''}${i === sel && !compose ? ' sel' : ''}${it.c.resolved ? ' resolved' : ''}` },
+        h('div', { class: 'comment-meta' }, h('b', { text: x.author || '（名前なし）' }), ` ${fmtDate(x.date)}`, !it.r && it.c.resolved ? h('span', { class: 'best', text: ' 解決済み' }) : null),
+        editing ? compose.area : h('div', { class: 'comment-text', text: x.text }));
+      box.append(el);
+      // 返信の入力欄はスレッドの最後に
+      const last = !items[i + 1] || items[i + 1].c.id !== it.c.id;
+      if (compose && compose.mode === 'reply' && compose.id === it.c.id && last) box.append(h('div', { class: 'comment reply composing' }, h('div', { class: 'comment-meta', text: '返信' }), compose.area));
+      if (i === sel && !compose) el.scrollIntoView({ block: 'nearest' });
+    });
+    if (compose && compose.mode === 'new') box.append(h('div', { class: 'comment composing' }, h('div', { class: 'comment-meta', text: '新しいコメント' }), compose.area));
+    const cur = items[sel];
+    api.setActive(cur ? cur.c.id : null);
+    if (compose) { compose.area.focus(); compose.area.scrollIntoView({ block: 'nearest' }); }
+  };
+  const startCompose = (mode, it) => {
+    const area = h('textarea', { rows: '3', 'aria-label': 'コメント' });
+    if (mode === 'edit') area.value = (it.r || it.c).text;
+    compose = { mode, id: it?.c.id, replyId: it?.r?.id || null, area };
+    render();
+    area.setSelectionRange(area.value.length, area.value.length);
+  };
+  const finishCompose = (post) => {
+    const c = compose;
+    compose = null;
+    const text = c.area.value.replace(/\s+$/, '');
+    if (post && text) {
+      if (c.mode === 'new') { api.add(text); sel = flat().length - 1; }
+      else if (c.mode === 'reply') { api.reply(c.id, text); const items = flat(); sel = items.findLastIndex((x) => x.c.id === c.id); }
+      else api.edit(c.id, text, c.replyId);
+    }
+    render();
+    d.el.focus();
+  };
+  d.focus = () => { if (compose) compose.area.focus(); else d.el.focus(); };
+  d.handleKey = (e) => {
+    if (compose) {
+      if (e.isComposing) return false;
+      if (e.key === 'Enter' && e.ctrlKey) { finishCompose(true); return true; }
+      if (e.key === 'Escape') { finishCompose(false); return true; }
+      if (e.key === 'Tab') return true;
+      return false;
+    }
+    const items = flat();
+    const cur = items[sel];
+    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (e.ctrlKey && e.altKey && k === 'm') { startCompose('new'); return true; }
+    if (e.ctrlKey || e.altKey || e.metaKey) return true;
+    switch (k) {
+      case 'Escape': case 'F6': d.close(true); return true;
+      case 'ArrowDown': sel = Math.min(items.length - 1, sel + 1); break;
+      case 'ArrowUp': sel = Math.max(0, sel - 1); break;
+      case 'Home': sel = 0; break;
+      case 'End': sel = items.length - 1; break;
+      case 'n': startCompose('new'); return true;
+      case 'r': if (cur) startCompose('reply', cur); return true;
+      case 'e': case 'F2': if (cur) startCompose('edit', cur); return true;
+      case 'Delete': case 'Backspace': if (cur) api.remove(cur.c.id, cur.r ? cur.r.id : null); break;
+      case ' ': if (cur) api.toggleResolved(cur.c.id); break;
+      case 'PageDown': case 'PageUp': {
+        const id = api.jump(k === 'PageDown' ? 1 : -1, cur ? cur.c.id : null);
+        if (id) sel = Math.max(0, flat().findIndex((x) => x.c.id === id));
+        break;
+      }
+      default: return true;
+    }
+    render();
+    return true;
+  };
+  const p = d.show();
+  if (focusId) sel = Math.max(0, flat().findIndex((x) => x.c.id === focusId));
+  if (start === 'new') startCompose('new'); else render();
+  return p.then((r) => { api.setActive(null); return r; });
+}

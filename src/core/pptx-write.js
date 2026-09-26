@@ -2,7 +2,7 @@
 import { tag, esc, XML_HEAD } from './xml.js';
 import { writeZip } from './zip.js';
 import { themeOf, resolveFontFamily } from './colors.js';
-import { createSlide, LAYOUTS, isLine, hasText, objText, bounds } from './model.js';
+import { createSlide, LAYOUTS, isLine, hasText, objText, bounds, commentAnchor } from './model.js';
 import { tableLayout } from './table.js';
 import { buildSteps } from './animation.js';
 import { seriesColor, isPieKind, isBarKind, isStacked } from './chart.js';
@@ -591,6 +591,35 @@ function notesSlideXml(text) {
 const relsXml = (rels) => XML_HEAD + tag('Relationships', { xmlns: 'http://schemas.openxmlformats.org/package/2006/relationships' },
   rels.map(([id, type, target, mode]) => tag('Relationship', { Id: id, Type: type.startsWith('http') ? type : `${REL}/${type}`, Target: target, TargetMode: mode })));
 
+// ---------------------------------------------------------------- コメント（従来の形式）
+const P15 = 'http://schemas.microsoft.com/office/powerpoint/2012/main';
+/** p:pos の単位は 1/576 インチ（1pt = 8） */
+const CM_POS = 8;
+
+function authorInitials(name) {
+  const words = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '';
+  return words.length > 1 ? (words[0][0] + words[1][0]).toUpperCase() : Array.from(words[0])[0].toUpperCase();
+}
+
+function commentsXml(slide, authorOf, size) {
+  const cms = [];
+  for (const c of slide.comments) {
+    const a = authorOf(c.author);
+    const idx = ++a.lastIdx;
+    const pos = commentAnchor(slide, c, size);
+    const posXml = tag('p:pos', { x: Math.round(pos.x * CM_POS), y: Math.round(pos.y * CM_POS) });
+    cms.push(tag('p:cm', { authorId: a.id, dt: c.date, idx }, posXml, tag('p:text', {}, esc(c.text))));
+    for (const r of c.replies) {
+      const ra = authorOf(r.author);
+      cms.push(tag('p:cm', { authorId: ra.id, dt: r.date, idx: ++ra.lastIdx }, posXml, tag('p:text', {}, esc(r.text)),
+        tag('p:extLst', {}, tag('p:ext', { uri: '{C676402C-5697-4E1C-873F-D02D1690AC5C}' },
+          tag('p15:threadingInfo', { 'xmlns:p15': P15, timeZoneBias: 0 }, tag('p15:parentCm', { authorId: a.id, idx }))))));
+    }
+  }
+  return XML_HEAD + tag('p:cmLst', nsAttrs, cms);
+}
+
 /** セクション（PowerPoint 2010 の拡張: p14:sectionLst）。スライドの ID は sldIdLst と同じ 256 + 番号 */
 function sectionsXml(pres) {
   const secs = pres.sections || [];
@@ -615,6 +644,12 @@ export function buildPptxFiles(pres, { title = '' } = {}) {
   const layoutIds = LAYOUTS.map((l) => l.id);
   const hasNotes = pres.slides.some((s) => s.notes && s.notes.trim());
   let chartCount = 0;
+  // コメントの作成者: 名前 → { id, initials, lastIdx }
+  const authors = new Map();
+  const authorOf = (name) => {
+    if (!authors.has(name)) authors.set(name, { id: authors.size, lastIdx: 0 });
+    return authors.get(name);
+  };
 
   pres.slides.forEach((slide, i) => {
     const n = i + 1;
@@ -655,6 +690,11 @@ export function buildPptxFiles(pres, { title = '' } = {}) {
       files[`ppt/notesSlides/_rels/notesSlide${n}.xml.rels`] = relsXml([['rId1', 'notesMaster', '../notesMasters/notesMaster1.xml'], ['rId2', 'slide', `../slides/slide${n}.xml`]]);
       overrides.push([`/ppt/notesSlides/notesSlide${n}.xml`, `${CT}.notesSlide+xml`]);
     }
+    if (slide.comments?.length) {
+      files[`ppt/comments/comment${n}.xml`] = commentsXml(slide, authorOf, size);
+      rels.push([`rId${rels.length + 1}`, 'comments', `../comments/comment${n}.xml`]);
+      overrides.push([`/ppt/comments/comment${n}.xml`, `${CT}.comments+xml`]);
+    }
     files[`ppt/slides/_rels/slide${n}.xml.rels`] = relsXml(rels);
     overrides.push([`/ppt/slides/slide${n}.xml`, `${CT}.slide+xml`]);
   });
@@ -690,6 +730,12 @@ export function buildPptxFiles(pres, { title = '' } = {}) {
   if (hasNotes) { notesMasterRel = `rId${presRels.length + 1}`; presRels.push([notesMasterRel, 'notesMaster', 'notesMasters/notesMaster1.xml']); }
   const n0 = presRels.length;
   presRels.push([`rId${n0 + 1}`, 'presProps', 'presProps.xml'], [`rId${n0 + 2}`, 'viewProps', 'viewProps.xml'], [`rId${n0 + 3}`, 'theme', 'theme/theme1.xml'], [`rId${n0 + 4}`, 'tableStyles', 'tableStyles.xml']);
+  if (authors.size) {
+    presRels.push([`rId${presRels.length + 1}`, 'commentAuthors', 'commentAuthors.xml']);
+    files['ppt/commentAuthors.xml'] = XML_HEAD + tag('p:cmAuthorLst', nsAttrs,
+      [...authors].map(([name, a]) => tag('p:cmAuthor', { id: a.id, name, initials: authorInitials(name), lastIdx: a.lastIdx, clrIdx: a.id % 8 })));
+    overrides.push(['/ppt/commentAuthors.xml', `${CT}.commentAuthors+xml`]);
+  }
   const wide = Math.abs(pres.width / pres.height - 16 / 9) < 0.01;
   const std = Math.abs(pres.width / pres.height - 4 / 3) < 0.01;
   files['ppt/presentation.xml'] = XML_HEAD + tag('p:presentation', { ...nsAttrs, saveSubsetFonts: 1 },

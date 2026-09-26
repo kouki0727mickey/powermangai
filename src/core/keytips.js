@@ -213,6 +213,25 @@ export const KEYTIPS = {
       ],
     },
     {
+      key: 'R', label: '校閲',
+      children: [
+        { key: 'C', label: '新しいコメント', action: 'newComment' },
+        {
+          key: 'D', label: '削除',
+          children: [
+            { key: 'D', label: 'コメントの削除', action: 'deleteComment' },
+            { key: 'A', label: 'このスライドのすべてのコメントを削除', action: 'deleteAllComments', args: false },
+            { key: 'P', label: 'このプレゼンテーションのすべてのコメントを削除', action: 'deleteAllComments', args: true },
+          ],
+        },
+        { key: 'V', label: '前のコメント', action: 'prevComment' },
+        { key: 'N', label: '次のコメント', action: 'nextComment' },
+        { key: 'P', label: 'コメント ウィンドウ', action: 'commentsPane' },
+        { key: 'H', label: 'コメントの表示 / 非表示', action: 'toggleCommentMarkers' },
+        { key: 'U', label: 'ユーザー名の変更', action: 'setAuthor' },
+      ],
+    },
+    {
       key: 'K', label: '画面切り替え',
       children: [
         { key: 'T', label: '画面切り替えの種類', action: 'gallery:transition' },

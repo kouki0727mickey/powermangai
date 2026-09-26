@@ -611,6 +611,78 @@ export function readChart(cs, theme, warn = () => {}) {
   };
 }
 
+// ---------------------------------------------------------------- コメント
+/** 作成者: 従来の形式（p:cmAuthor の id）と新しい形式（p188:author の id）→ 名前 */
+function readCommentAuthors(pkg, presRels) {
+  const map = new Map();
+  for (const r of Object.values(presRels)) {
+    if (r.type === 'commentAuthors') for (const a of kids(pkg.xml(r.target), 'p:cmAuthor')) map.set(`l:${a.attrs.id}`, a.attrs.name || '');
+    if (r.type === 'authors') for (const a of kids(pkg.xml(r.target), 'p188:author')) map.set(`m:${a.attrs.id}`, a.attrs.name || '');
+  }
+  return map;
+}
+
+const EMU_PER_PT = 12700;
+
+/**
+ * コメントのパーツを読む。LibreOffice は p:text の中の & と < をエスケープせずに書き出すことがあるので、
+ * 整形式でなければ p:text の中身をエスケープし直して読む。それでも読めなければ null。
+ */
+function commentsPart(pkg, target) {
+  try {
+    return pkg.xml(target);
+  } catch {
+    const raw = pkg.files[target];
+    if (!raw) return null;
+    const fixed = new TextDecoder().decode(raw).replace(/(<p:text>)([\s\S]*?)(<\/p:text>)/g, (m, a, body, b) =>
+      a + body.replace(/&(?!(?:[a-zA-Z]+|#\d+|#x[0-9a-fA-F]+);)/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + b);
+    try { return parseXml(fixed); } catch { return null; }
+  }
+}
+
+function readComments(pkg, rels, authors, slide, warn) {
+  const out = [];
+  const date = (s) => (s && !Number.isNaN(Date.parse(s)) ? new Date(Date.parse(s)).toISOString() : new Date(0).toISOString());
+  for (const r of Object.values(rels)) {
+    if (r.type !== 'comments') continue;
+    const x = commentsPart(pkg, r.target);
+    if (!x) { if (pkg.files[r.target]) warn('読み込めないコメント'); continue; }
+    if (x.name === 'p:cmLst') {
+      // 従来の形式: 返信は p15:threadingInfo の親（作成者 + 番号）で見分ける
+      const byKey = new Map();
+      const replies = [];
+      for (const cm of kids(x, 'p:cm')) {
+        const pos = kid(cm, 'p:pos');
+        const item = {
+          id: newId('c'), author: authors.get(`l:${cm.attrs.authorId}`) ?? '', date: date(cm.attrs.dt), text: textOf(kid(cm, 'p:text')),
+          x: pos ? Number(pos.attrs.x) / 8 || 0 : 0, y: pos ? Number(pos.attrs.y) / 8 || 0 : 0, resolved: false, replies: [],
+        };
+        const parent = xpath(cm, 'p:extLst/p:ext/p15:threadingInfo/p15:parentCm');
+        if (parent) replies.push([`${parent.attrs.authorId}:${parent.attrs.idx}`, item]);
+        else { byKey.set(`${cm.attrs.authorId}:${cm.attrs.idx}`, item); out.push(item); }
+      }
+      for (const [key, item] of replies) {
+        const p = byKey.get(key);
+        if (p) p.replies.push({ id: item.id, author: item.author, date: item.date, text: item.text });
+        else out.push(item);
+      }
+    } else if (x.name === 'p188:cmLst') {
+      // 新しい形式（Microsoft 365）
+      const body = (el) => kids(kid(el, 'p188:txBody'), 'a:p').map((p) => textOf(p)).join('\n');
+      for (const cm of kids(x, 'p188:cm')) {
+        const pos = kid(cm, 'p188:pos');
+        out.push({
+          id: newId('c'), author: authors.get(`m:${cm.attrs.authorId}`) ?? '', date: date(cm.attrs.created), text: body(cm),
+          x: pos ? Number(pos.attrs.x) / EMU_PER_PT || 0 : 0, y: pos ? Number(pos.attrs.y) / EMU_PER_PT || 0 : 0,
+          resolved: cm.attrs.status === 'resolved',
+          replies: kids(kid(cm, 'p188:replyLst'), 'p188:reply').map((rp) => ({ id: newId('c'), author: authors.get(`m:${rp.attrs.authorId}`) ?? '', date: date(rp.attrs.created), text: body(rp) })),
+        });
+      }
+    } else warn('読み込めないコメント');
+  }
+  return out;
+}
+
 function cleanFont(f) {
   const d = defaultRunFont();
   return {
@@ -748,6 +820,7 @@ export async function importPptx(bytes) {
   const pres = createPresentation({ width, height });
   if (theme.id === 'custom') { pres.theme = 'custom'; pres.customTheme = theme; } else pres.theme = theme.id;
   const hf = {};
+  const authors = readCommentAuthors(pkg, presRels);
   const sldIds = kids(kid(px, 'p:sldIdLst'), 'p:sldId');
   const slideIdOf = new Map(); // .pptx のスライド ID → 読み込んだスライドの ID
   pres.slides = sldIds.map((sid) => {
@@ -773,6 +846,7 @@ export async function importPptx(bytes) {
       const body = kids(xpath(nx, 'p:cSld/p:spTree'), 'p:sp').find((sp) => xpath(sp, 'p:nvSpPr/p:nvPr/p:ph')?.attrs.type === 'body');
       if (body) slide.notes = kids(kid(body, 'p:txBody'), 'a:p').map((p) => textOf(p)).join('\n').replace(/\s+$/, '');
     }
+    slide.comments = readComments(pkg, reader.rels, authors, slide, warn);
     Object.assign(hf, reader.headerFooter);
     slideIdOf.set(sid.attrs.id, slide.id);
     return slide;

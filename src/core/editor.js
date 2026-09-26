@@ -1290,6 +1290,92 @@ export class Editor {
     this.emit();
     return true;
   }
+
+  // ---- コメント ----
+  findComment(id) {
+    for (const [i, sl] of this.pres.slides.entries()) {
+      const c = (sl.comments || []).find((x) => x.id === id);
+      if (c) return { slide: sl, index: i, comment: c };
+    }
+    return null;
+  }
+
+  /** 現在のスライドにコメントを追加。図形を選択していればその右上に付ける */
+  addComment(text, author, date = new Date().toISOString()) {
+    const target = this.selectedObjects()[0];
+    const slide = this.slide;
+    let x = 10, y = 10;
+    if (target) {
+      const b = bounds([target]);
+      x = Math.min(this.pres.width - 20, b.x + b.w);
+      y = Math.max(0, b.y);
+    } else {
+      // 既存のマーカーと重ならないように右へずらす
+      const used = (slide.comments || []).filter((c) => !c.target).length;
+      x = Math.min(this.pres.width - 20, 10 + used * 26);
+    }
+    const c = { id: newId('c'), author, date, text, x, y, resolved: false, replies: [], ...(target ? { target: target.id } : {}) };
+    this.mutate(() => { (slide.comments ||= []).push(c); });
+    return c;
+  }
+
+  replyComment(id, text, author, date = new Date().toISOString()) {
+    const f = this.findComment(id);
+    if (!f) return null;
+    const r = { id: newId('c'), author, date, text };
+    this.mutate(() => { f.comment.replies.push(r); });
+    return r;
+  }
+
+  /** コメント（replyId があれば返信）の文字を変える */
+  editComment(id, text, replyId = null) {
+    const f = this.findComment(id);
+    const item = f && (replyId ? f.comment.replies.find((r) => r.id === replyId) : f.comment);
+    if (!item) return false;
+    this.mutate(() => { item.text = text; });
+    return true;
+  }
+
+  /** コメント（replyId があれば返信だけ）を削除 */
+  deleteComment(id, replyId = null) {
+    const f = this.findComment(id);
+    if (!f) return false;
+    this.mutate(() => {
+      if (replyId) f.comment.replies = f.comment.replies.filter((r) => r.id !== replyId);
+      else f.slide.comments = f.slide.comments.filter((c) => c.id !== id);
+    });
+    return true;
+  }
+
+  toggleCommentResolved(id) {
+    const f = this.findComment(id);
+    if (!f) return false;
+    this.mutate(() => { f.comment.resolved = !f.comment.resolved; });
+    return true;
+  }
+
+  /** all = すべてのスライドのコメント、false = 現在のスライドのコメント */
+  deleteAllComments(all = false) {
+    const slides = all ? this.pres.slides : [this.slide];
+    if (!slides.some((sl) => sl.comments?.length)) return false;
+    this.mutate(() => { for (const sl of slides) sl.comments = []; });
+    return true;
+  }
+
+  /** 次 / 前のコメント（スライドをまたいで順に。末尾の次は先頭）。{ slideIndex, id } か null */
+  adjacentComment(dir, fromId = null) {
+    const all = this.pres.slides.flatMap((sl, i) => (sl.comments || []).map((c) => ({ slideIndex: i, id: c.id })));
+    if (!all.length) return null;
+    let k = all.findIndex((c) => c.id === fromId);
+    if (k < 0) {
+      // 現在のスライドより後（前）の最初のコメント
+      const i = this.slideIndex;
+      k = dir > 0 ? all.findIndex((c) => c.slideIndex >= i) : all.findLastIndex((c) => c.slideIndex <= i);
+      if (k < 0) k = dir > 0 ? 0 : all.length - 1;
+      return all[k];
+    }
+    return all[(k + dir + all.length) % all.length];
+  }
 }
 
 export function stepFontSize(size, dir) {
@@ -1331,5 +1417,11 @@ function reidSlide(slide) {
   reidObjects(slide.objects, idMap);
   // アニメーションの対象も新しい ID に付け替える
   slide.animations = (slide.animations || []).filter((a) => idMap.has(a.target)).map((a) => ({ ...a, target: idMap.get(a.target) }));
+  // コメントも複製する（ID を振り直し、付けた図形を付け替える）
+  slide.comments = (slide.comments || []).map((c) => {
+    const out = { ...c, id: newId('c'), replies: c.replies.map((r) => ({ ...r, id: newId('c') })) };
+    if (c.target) { if (idMap.has(c.target)) out.target = idMap.get(c.target); else delete out.target; }
+    return out;
+  });
   return slide;
 }

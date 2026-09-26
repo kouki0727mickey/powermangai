@@ -150,7 +150,7 @@ export function createSlide(layout = 'blank', size = { width: SLIDE_W, height: S
   const W = size.width, H = size.height;
   const sx = (v) => Math.round((v * W) / SLIDE_W);
   const sy = (v) => Math.round((v * H) / SLIDE_H);
-  const slide = { id: newId('s'), layout, objects: [], background: null, notes: '', hidden: false, transition: null, animations: [], advanceAfter: null };
+  const slide = { id: newId('s'), layout, objects: [], background: null, notes: '', hidden: false, transition: null, animations: [], advanceAfter: null, comments: [] };
   const title = (y, h) => placeholder('title', sx(60), sy(y), sx(840), sy(h), 'タイトルを入力', { family: '+major', size: 36 });
   const body = (x, w) => placeholder('body', sx(x), sy(130), sx(w), sy(370), 'テキストを入力', { size: 24 }, { bullet: 'bullet' });
   switch (layout) {
@@ -341,6 +341,41 @@ function checkTable(t) {
   t.bandedRows = t.bandedRows !== false;
 }
 
+// ---- コメント: { id, author, date, text, x, y, target?, resolved, replies: [{ id, author, date, text }] }
+export const MAX_COMMENT_TEXT = 10000;
+function checkCommentBase(c) {
+  return {
+    id: typeof c.id === 'string' ? c.id : newId('c'),
+    author: typeof c.author === 'string' ? c.author.slice(0, 200) : '',
+    date: typeof c.date === 'string' && !Number.isNaN(Date.parse(c.date)) ? c.date : new Date(0).toISOString(),
+    text: typeof c.text === 'string' ? c.text.slice(0, MAX_COMMENT_TEXT) : '',
+  };
+}
+
+/** コメントのマーカーの位置: 図形に付けたコメントは図形の右上（図形が無ければ保存した位置） */
+export function commentAnchor(slide, c, size = { width: SLIDE_W, height: SLIDE_H }) {
+  const o = c.target && slide.objects.find((x) => x.id === c.target);
+  if (!o) return { x: c.x, y: c.y };
+  const b = bounds([o]);
+  return { x: Math.min(size.width - 20, b.x + b.w), y: Math.max(0, b.y) };
+}
+
+function checkComments(list, objects, size) {
+  if (!Array.isArray(list)) return [];
+  const ids = new Set(objects.map((o) => o.id));
+  return list.filter((c) => c && typeof c === 'object').slice(0, 1000).map((c) => {
+    const out = {
+      ...checkCommentBase(c),
+      x: Number.isFinite(c.x) ? Math.max(0, Math.min(size.width, c.x)) : 0,
+      y: Number.isFinite(c.y) ? Math.max(0, Math.min(size.height, c.y)) : 0,
+      resolved: c.resolved === true,
+      replies: Array.isArray(c.replies) ? c.replies.filter((r) => r && typeof r === 'object').slice(0, 1000).map(checkCommentBase) : [],
+    };
+    if (typeof c.target === 'string' && ids.has(c.target)) out.target = c.target;
+    return out;
+  });
+}
+
 function checkSlide(s, size) {
   if (!s || !Array.isArray(s.objects)) fail('スライドの形式が正しくありません');
   const slide = createSlide('blank', size);
@@ -356,6 +391,7 @@ function checkSlide(s, size) {
   if (s.transition && typeof s.transition === 'object' && TRANSITION_IDS.has(s.transition.type) && s.transition.type !== 'none') {
     slide.transition = { type: s.transition.type, duration: dur(s.transition.duration, 0.7), direction: dirOk(s.transition.direction) ? s.transition.direction : undefined };
   }
+  slide.comments = checkComments(s.comments, slide.objects, size);
   if (Array.isArray(s.animations)) {
     const ids = new Set(slide.objects.map((o) => o.id));
     slide.animations = s.animations

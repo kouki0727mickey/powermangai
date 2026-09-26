@@ -502,3 +502,35 @@ export function slideToDataUrl(pres, slide, width, height, index = 0) {
   drawSlide(canvas.getContext('2d'), slide, width, height, { pres, index });
   return canvas.toDataURL('image/png');
 }
+
+/** コメントのマーカー（吹き出し）。markers: [{ x, y, label, active, resolved }]（スライドの座標） */
+export function drawCommentMarkers(ctx, markers, width, height, size, dpr = 1) {
+  const sx = width / size.width, sy = height / size.height;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.font = `${10 * dpr}px ${FONT_FALLBACK}`;
+  for (const m of markers) {
+    const w = Math.max(22 * dpr, ctx.measureText(m.label).width + 8 * dpr), hgt = 16 * dpr, tail = 5 * dpr;
+    const x = Math.round(m.x * sx), y = Math.round(m.y * sy);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + w, y);
+    ctx.lineTo(x + w, y + hgt);
+    ctx.lineTo(x + tail * 2, y + hgt);
+    ctx.lineTo(x + tail, y + hgt + tail);
+    ctx.lineTo(x + tail, y + hgt);
+    ctx.lineTo(x, y + hgt);
+    ctx.closePath();
+    ctx.fillStyle = m.resolved ? '#D9D9D9' : '#FCE4D6';
+    ctx.fill();
+    ctx.lineWidth = (m.active ? 2 : 1) * dpr;
+    ctx.strokeStyle = m.active ? '#2B579A' : '#C55A11';
+    ctx.stroke();
+    ctx.fillStyle = '#404040';
+    ctx.font = `${10 * dpr}px ${FONT_FALLBACK}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(m.label, x + w / 2, y + hgt / 2 + 0.5 * dpr);
+  }
+  ctx.restore();
+}
