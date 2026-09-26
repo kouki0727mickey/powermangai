@@ -189,7 +189,7 @@ body.mouse-blocked * { cursor: not-allowed !important; }
 }
 
 #slideshow { position: fixed; inset: 0; background: #000; z-index: 100; display: flex; align-items: center; justify-content: center; }
-#show-main { position: relative; flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; }
+#show-main { position: relative; flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 #presenter { width: 32%; height: 100%; background: #1e1e1e; color: #eee; padding: 16px; display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; }
 #presenter[hidden] { display: none; }
 .pv-head { display: flex; justify-content: space-between; font-size: 22px; font-variant-numeric: tabular-nums; }

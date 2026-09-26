@@ -72,6 +72,13 @@ function displayColor(f, theme) {
 function drawVertical(ctx, o, theme) {
   const { cols } = layoutVertical(o, measureText, theme);
   for (const c of cols) {
+    if (c.bullet) {
+      ctx.font = fontCss(c.bullet.font);
+      ctx.fillStyle = resolveColor(c.bullet.font.color, theme);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(c.bullet.text, c.x, c.bullet.y);
+    }
     for (const ch of c.chars) {
       const f = ch.font;
       ctx.font = fontCss(f);

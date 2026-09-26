@@ -99,3 +99,31 @@ test('保存データ: リンク・縦書き・代替テキスト・自動切り
   assert.deepEqual(o.paragraphs[0].runs.map((r) => r.font.link), ['https://ok.example/', undefined]);
   assert.deepEqual(p.slides.map((s) => s.advanceAfter), [2, null]);
 });
+
+test('スライドを複数選択したまま貼り付けると、選択の最後の後ろに入り、貼り付けたスライドが選択される', () => {
+  const e = ed(4);
+  const ids = e.pres.slides.map((s) => s.id);
+  e.pane = 'slides';
+  e.gotoSlide(2);
+  e.extendSlideSelection(-1);
+  e.extendSlideSelection(-1); // 1〜3 枚目（現在は 1 枚目）
+  e.copy();
+  e.paste();
+  assert.equal(e.pres.slides.length, 7);
+  assert.deepEqual(e.pres.slides.slice(0, 3).map((s) => s.id), ids.slice(0, 3));
+  assert.deepEqual(e.selectedSlideIndexes(), [3, 4, 5]);
+  e.deleteSlide();
+  assert.deepEqual(e.pres.slides.map((s) => s.id), ids, '貼り付けたスライドだけが削除される');
+});
+
+test('縦書きの行頭文字とインデント', async () => {
+  const { layoutVertical, LEVEL_INDENT, BULLET_HANG } = await import('../src/core/textlayout.js');
+  const { createObject } = await import('../src/core/model.js');
+  const o = createObject('text', { w: 200, h: 300, text: 'あい\nう', vertical: true, autoFit: 'none' });
+  o.paragraphs[0].bullet = 'bullet';
+  o.paragraphs[1].level = 1;
+  const { cols } = layoutVertical(o, (f, t) => t.length * f.size);
+  assert.equal(cols[0].bullet.text, '•');
+  assert.equal(cols[0].chars[0].y - cols[0].bullet.y, BULLET_HANG);
+  assert.equal(cols[1].chars[0].y - cols[0].bullet.y, LEVEL_INDENT);
+});

@@ -242,14 +242,17 @@ export function layoutVertical(o, measure, theme = DEFAULT_THEME) {
   const tr = textRect(o.type, o.w, o.h);
   const colLen = Math.max(1, tr.h - ins.t - ins.b);
   const cols = [];
-  o.paragraphs.forEach((p) => {
-    const start = p.level * LEVEL_INDENT;
+  const labels = numberingLabels(o.paragraphs);
+  o.paragraphs.forEach((p, pi) => {
+    // 縦書きでは段落のレベル（インデント）と行頭文字は列の上に置く
+    const start = p.level * LEVEL_INDENT + (labels[pi] ? BULLET_HANG : 0);
     let cur = null;
     const newCol = (emptySize) => {
-      cur = { chars: [], len: start, size: emptySize || p.runs[0].font.size, lineSpacing: p.lineSpacing, align: p.align };
+      cur = { chars: [], start, len: start, size: emptySize || p.runs[0].font.size, lineSpacing: p.lineSpacing, align: p.align };
       cols.push(cur);
     };
     newCol();
+    if (labels[pi]) cur.bullet = { text: labels[pi], font: effectiveFont({ ...p.runs[0].font, baseline: 0 }, theme), offset: p.level * LEVEL_INDENT };
     for (const r of p.runs) {
       const ef = effectiveFont(r.font, theme);
       for (const ch of Array.from(r.text)) {
@@ -278,7 +281,9 @@ export function layoutVertical(o, measure, theme = DEFAULT_THEME) {
     c.x = x - c.width / 2;
     x -= c.width;
     const extra = colLen - c.len;
-    let y = tr.y + ins.t + (c.align === 'center' ? extra / 2 : c.align === 'right' ? extra : 0);
+    const top = tr.y + ins.t;
+    let y = top + c.start + (c.align === 'center' ? extra / 2 : c.align === 'right' ? extra : 0);
+    if (c.bullet) c.bullet.y = top + c.bullet.offset;
     for (const ch of c.chars) { ch.y = y; y += ch.adv; }
   }
   return { cols, width: total };

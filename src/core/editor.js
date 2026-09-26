@@ -727,10 +727,14 @@ export class Editor {
     const clip = this.clipboard;
     if (!clip) return false;
     if (clip.kind === 'slides') {
+      // 選択中のスライド（複数選択なら最後のスライド）の後ろに貼り付け、貼り付けたスライドを選択する
+      const at = this.selectedSlideIndexes().at(-1) + 1;
       this.mutate(() => {
         const slides = clone(clip.items).map((s) => reidSlide(s));
-        this.pres.slides.splice(this.slideIndex + 1, 0, ...slides);
-        this.slideIndex += 1;
+        this.pres.slides.splice(at, 0, ...slides);
+        this.slideIndex = at;
+        this.clearSlideSelection();
+        if (slides.length > 1) { this.slideSel = slides.map((sl) => sl.id); this.slideAnchor = at; }
         this.selection = [];
       });
       return true;

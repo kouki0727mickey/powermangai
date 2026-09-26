@@ -1480,7 +1480,8 @@ function endShow() {
 }
 
 function sizeShowCanvas() {
-  const vw = app.show?.presenter ? $('show-main').clientWidth || window.innerWidth * 0.68 : window.innerWidth;
+  // 発表者ビューではスライドの領域は画面の 68%（右の 32% が発表者用のパネル）
+  const vw = app.show?.presenter ? window.innerWidth * 0.68 : window.innerWidth;
   const vh = window.innerHeight;
   const { width: SW, height: SH } = editor.size;
   const scale = Math.min(vw / SW, vh / SH);
@@ -1596,7 +1597,7 @@ function showNext() {
   }
   if (s.index > last) { endShow(); return; }
   const next = visibleSlide(s.index + 1, 1);
-  if (next > last) { s.index = last + 1; s.steps = []; tickShow(); return; }
+  if (next > last) { s.index = last + 1; s.steps = []; renderPresenter(); tickShow(); return; }
   enterShowSlide(next, { transition: true });
 }
 
