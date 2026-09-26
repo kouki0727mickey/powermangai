@@ -55,8 +55,9 @@ function rPr(name, f) {
   return tag(name, {
     lang: 'ja-JP', altLang: 'en-US', sz: Math.round(f.size * 100),
     b: f.bold ? 1 : 0, i: f.italic ? 1 : 0, u: f.underline ? 'sng' : undefined, strike: f.strike ? 'sngStrike' : undefined,
+    spc: f.spacing ? Math.round(f.spacing * 100) : undefined,
     baseline: f.baseline === 'super' ? 30000 : f.baseline === 'sub' ? -25000 : undefined, dirty: 0,
-  }, fill(f.color), fontFaces(f.family), link);
+  }, fill(f.color), f.highlight ? tag('a:highlight', {}, colorXml(f.highlight)) : '', fontFaces(f.family), link);
 }
 
 // ---------------------------------------------------------------- 文字

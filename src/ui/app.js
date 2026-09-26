@@ -388,6 +388,12 @@ function renderRibbon() {
   const topLevel = s && s.stack.length === 1;
   const activeKey = s && s.stack.length > 1 ? s.path[0] : null;
   for (const t of KEYTIPS.children) {
+    if (t.qat) {
+      const q = h('span', { class: 'ribbon-qat', title: t.label, text: { save: '💾', undo: '↶', redo: '↷' }[t.action] || t.label });
+      if (topLevel && t.key.startsWith(s.buffer)) q.append(h('span', { class: 'badge', text: t.key }));
+      tabs.append(q);
+      continue;
+    }
     const el = h('span', { class: `ribbon-tab${activeKey === t.key ? ' active' : ''}`, text: t.label });
     if (topLevel && t.key.startsWith(s.buffer)) el.append(h('span', { class: 'badge', text: t.key }));
     tabs.append(el);
@@ -497,7 +503,7 @@ const TEXT_KEEP = new Set([
   'input:fontSize', 'input:fontFamily', 'palette:fontColor', 'bullets', 'numbering', 'demote', 'promote',
   'lineSpacing1', 'lineSpacing15', 'lineSpacing2', 'gallery:lineSpacing', 'moveParaUp', 'moveParaDown',
   'textUndo', 'textRedo', 'copyFormat', 'pasteFormat', 'textAnchor', 'save', 'saveAs', 'palette:cellFill',
-  'hyperlink', 'insertSymbol', 'textDirection',
+  'hyperlink', 'insertSymbol', 'textDirection', 'palette:highlight', 'gallery:spacing',
 ]);
 
 // ------------------------------------------------------------------ アクション
@@ -1074,6 +1080,21 @@ const ACTIONS = {
       return true;
     },
   ),
+  'palette:highlight': fmt(
+    () => keepTextSelection(
+      () => openPalette('蛍光ペンの色', { current: rich.currentFont().highlight ?? null, theme: editor.theme }),
+      (r) => rich.setFontProp('highlight', r.color ?? undefined),
+    ),
+    async () => {
+      const r = await openPalette('蛍光ペンの色', { current: currentFont()?.highlight ?? null, theme: editor.theme });
+      if (r) editor.setFont('highlight', r.color ?? undefined);
+      return true;
+    },
+  ),
+  'gallery:spacing': fmt(
+    () => keepTextSelection(() => chooseSpacing(rich.currentFont().spacing), (v) => rich.setFontProp('spacing', v || undefined)),
+    async () => { const v = await chooseSpacing(currentFont()?.spacing); if (v !== null) editor.setFont('spacing', v || undefined); return true; },
+  ),
   'input:fontSize': fmt(
     () => keepTextSelection(inputFontSize, (v) => rich.setFontProp('size', v)),
     async () => { const v = await inputFontSize(); if (v !== null) editor.setFont('size', v); return true; },
@@ -1290,6 +1311,12 @@ async function inputFontFamily() {
   const cur = currentFont()?.family ?? '+minor';
   const v = await openInput('フォント（+major = 見出しのフォント、+minor = 本文のフォント）', { value: cur, suggestions: FONT_FAMILIES, validate: (x) => (x ? null : 'フォント名を入力してください') });
   return v;
+}
+
+const CHAR_SPACINGS = [['非常に狭い', -3], ['狭い', -1.5], ['標準', 0], ['広い', 3], ['非常に広い', 6]];
+async function chooseSpacing(current = 0) {
+  const i = CHAR_SPACINGS.findIndex(([, v]) => v === (current || 0));
+  return openList('文字の間隔', CHAR_SPACINGS.map(([label, v]) => ({ label: `${label}（${v > 0 ? '+' : ''}${v} pt）`, value: v })), { initial: i < 0 ? 2 : i });
 }
 
 async function chooseLineSpacing() {

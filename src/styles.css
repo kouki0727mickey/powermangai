@@ -40,7 +40,9 @@ body.mouse-blocked * { cursor: not-allowed !important; }
   background: #3b3b3b; color: #fff; font-size: 11px; line-height: 18px; text-align: center;
   border-radius: 2px; font-family: Consolas, monospace;
 }
-.ribbon-tab .badge { position: absolute; left: 50%; top: 100%; transform: translate(-50%, -4px); z-index: 5; }
+.ribbon-qat { position: relative; padding: 4px 6px; font-size: 13px; color: var(--muted); }
+.ribbon-qat:nth-last-child(1 of .ribbon-qat) { margin-right: 12px; border-right: 1px solid var(--border); padding-right: 12px; }
+.ribbon-tab .badge, .ribbon-qat .badge { position: absolute; left: 50%; top: 100%; transform: translate(-50%, -4px); z-index: 5; }
 
 #workspace { flex: 1; display: flex; min-height: 0; }
 

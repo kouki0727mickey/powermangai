@@ -200,8 +200,11 @@ function readRPr(r, theme, rels) {
   if (r.attrs.u !== undefined) o.underline = r.attrs.u !== 'none';
   if (r.attrs.strike !== undefined) o.strike = r.attrs.strike !== 'noStrike';
   if (r.attrs.baseline !== undefined) { const b = Number(r.attrs.baseline); o.baseline = b > 0 ? 'super' : b < 0 ? 'sub' : 0; }
+  if (r.attrs.spc !== undefined) { const v = Number(r.attrs.spc) / 100; if (Number.isFinite(v)) o.spacing = Math.max(-20, Math.min(100, v)); }
   const f = readFill(r, theme);
   if (f) o.color = f.value;
+  const hi = kid(r, 'a:highlight');
+  if (hi) { const c = readColor(kids(hi)[0], theme); if (c) o.highlight = c.value; }
   const face = (el) => {
     const tf = el?.attrs.typeface;
     if (!tf) return null;
@@ -515,6 +518,8 @@ function cleanFont(f) {
     bold: !!f.bold, italic: !!f.italic, underline: !!f.underline, strike: !!f.strike,
     color: f.color || d.color, baseline: f.baseline || 0,
     ...(f.link ? { link: f.link } : {}),
+    ...(f.highlight ? { highlight: f.highlight } : {}),
+    ...(f.spacing ? { spacing: f.spacing } : {}),
   };
 }
 

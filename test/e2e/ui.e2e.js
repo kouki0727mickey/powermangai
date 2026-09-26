@@ -1075,3 +1075,38 @@ test('PNG で書き出し（Alt → F → E）', async () => {
   assert.equal(buf.slice(1, 4).toString(), 'PNG');
   assert.equal(buf.readUInt32BE(16), 1920, '幅 1920 ピクセル');
 });
+
+test('蛍光ペン（Alt → H → T → H）・文字の間隔（Alt → H → F → T）とクイック アクセス（Alt → 2 / 1）', async () => {
+  await fresh();
+  await keys('Tab');
+  await page.keyboard.type('ABC');
+  await keys('Shift+ArrowLeft', 'Shift+ArrowLeft');
+  await alt('h', 't', 'h');
+  await page.waitForSelector('.palette');
+  await keys('ArrowDown', 'ArrowRight', 'ArrowRight', 'ArrowRight', 'Enter');
+  assert.equal(await ed(() => __pmg.editor.editingId !== null), true, '編集は続く');
+  await alt('h', 'f', 't');
+  await page.waitForSelector('.list');
+  await keys('End', 'Enter');
+  await keys('Escape');
+  const runs = () => ed(() => __pmg.editor.slide.objects[0].paragraphs[0].runs.map((r) => [r.text, r.font.highlight ?? null, r.font.spacing ?? 0]));
+  const r1 = await runs();
+  assert.equal(r1.length, 2, JSON.stringify(r1));
+  assert.deepEqual([r1[0][0], r1[0][1], r1[0][2]], ['A', null, 0]);
+  assert.equal(r1[1][0], 'BC');
+  assert.ok(r1[1][1], '蛍光ペンの色');
+  assert.equal(r1[1][2], 6);
+  // 図形を選択したまま、蛍光ペンを「なし」に
+  await alt('h', 't', 'h');
+  await page.waitForSelector('.palette');
+  await keys('n');
+  assert.ok((await runs()).every((r) => r[1] === null));
+  // クイック アクセス ツール バー: Alt → 2 で元に戻す、Alt → 1 で上書き保存
+  await alt('2');
+  assert.ok((await runs()).some((r) => r[1]), '元に戻すと蛍光ペンが戻る');
+  page.once('dialog', (d) => d.accept('qat.pptx'));
+  const download = page.waitForEvent('download');
+  await alt('1');
+  assert.equal((await download).suggestedFilename(), 'qat.pptx');
+  assert.deepEqual(errors, []);
+});

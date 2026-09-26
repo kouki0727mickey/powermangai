@@ -59,7 +59,7 @@ export function plainText(paras) {
 export function sameFont(a, b) {
   return a.family === b.family && a.size === b.size && a.bold === b.bold && a.italic === b.italic
     && a.underline === b.underline && a.strike === b.strike && a.color === b.color && a.baseline === b.baseline
-    && (a.link || '') === (b.link || '');
+    && (a.link || '') === (b.link || '') && (a.highlight || '') === (b.highlight || '') && (a.spacing || 0) === (b.spacing || 0);
 }
 
 /** リンクとして使える URL か（http / https / mailto のみ） */

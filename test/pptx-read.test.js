@@ -197,3 +197,19 @@ test('PowerPoint 2010 形式の画面切り替え（Choice の p14 独自の効�
   const { pres } = await importPptx(await writeZip(files));
   assert.deepEqual(pres.slides[0].transition, { type: 'wipe', duration: 2, direction: 'fromLeft' });
 });
+
+test('蛍光ペンと文字の間隔の往復（python-pptx でも読める XML）', async () => {
+  const { pres: src } = samplePresentation();
+  const title = src.slides[0].objects[0];
+  const r0 = title.paragraphs[0].runs[0];
+  title.paragraphs[0].runs = [
+    { text: '四半期', font: { ...r0.font, highlight: '#FFFF00', spacing: 3 } },
+    { text: 'の報告', font: { ...r0.font, highlight: '@accent2', spacing: -1.5 } },
+  ];
+  const { buildPptxFiles } = await import('../src/core/pptx-write.js');
+  const xml = buildPptxFiles(src)['ppt/slides/slide1.xml'];
+  assert.match(xml, /<a:rPr [^>]*spc="300"[^>]*><a:solidFill>.*?<\/a:solidFill><a:highlight><a:srgbClr val="FFFF00"\/><\/a:highlight><a:latin/);
+  const { pres } = await importPptx(await exportPptx(src));
+  const runs = pres.slides[0].objects[0].paragraphs[0].runs;
+  assert.deepEqual(runs.map((r) => [r.text, r.font.highlight, r.font.spacing]), [['四半期', '#FFFF00', 3], ['の報告', '@accent2', -1.5]]);
+});

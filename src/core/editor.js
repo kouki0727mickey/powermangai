@@ -418,7 +418,7 @@ export class Editor {
   setFont(prop, value) {
     const objs = this.textObjects();
     if (objs.length === 0) return false;
-    this.mutate(() => { for (const o of objs) applyFontAll(allParas(o), (f) => { f[prop] = value; }); });
+    this.mutate(() => { for (const o of objs) applyFontAll(allParas(o), (f) => { if (value === undefined) delete f[prop]; else f[prop] = value; }); });
     return true;
   }
 
@@ -442,7 +442,7 @@ export class Editor {
     if (objs.length === 0) return false;
     this.mutate(() => {
       for (const o of objs) {
-        applyFontAll(allParas(o), (f) => { f.bold = false; f.italic = false; f.underline = false; f.strike = false; f.baseline = 0; });
+        applyFontAll(allParas(o), (f) => { f.bold = false; f.italic = false; f.underline = false; f.strike = false; f.baseline = 0; delete f.spacing; });
       }
     });
     return true;

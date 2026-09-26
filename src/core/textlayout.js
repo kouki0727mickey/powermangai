@@ -218,8 +218,9 @@ export function layoutObjectText(o, measure, theme = DEFAULT_THEME) {
 /** Node（テスト）用の概算の文字幅: 全角 = 1em、半角 = 0.55em */
 export function approxMeasure(font, text) {
   let w = 0;
-  for (const ch of text) w += /[\u0000-ÿ]/.test(ch) ? 0.55 : 1;
-  return w * font.size;
+  let n = 0;
+  for (const ch of text) { w += /[\u0000-ÿ]/.test(ch) ? 0.55 : 1; n++; }
+  return w * font.size + (font.spacing || 0) * n;
 }
 
 // ---------------------------------------------------------------- 縦書き
@@ -258,7 +259,7 @@ export function layoutVertical(o, measure, theme = DEFAULT_THEME) {
       for (const ch of Array.from(r.text)) {
         if (ch === '\n') { newCol(r.font.size); continue; }
         const upright = uprightInVertical(ch);
-        const adv = upright ? ef.size : measure(ef, ch);
+        const adv = upright ? ef.size + (ef.spacing || 0) : measure(ef, ch);
         if (cur.chars.length && cur.len + adv > colLen && o.wrap !== false) newCol(r.font.size);
         cur.chars.push({ ch, font: { ...ef, base: r.font.size }, adv, upright, shift: SHIFT_IN_VERTICAL.has(ch) });
         cur.len += adv;

@@ -143,7 +143,9 @@ export class RichEditor {
     // 縦書きでは半角の英数字は横倒し（PowerPoint と同じ）
     const color = resolveColor(font.link ? '@hlink' : font.color, this.theme);
     const decoration = font.link && !deco.includes('underline') ? `underline ${deco === 'none' ? '' : deco}`.trim() : deco;
-    return `font:${fontCss({ ...ef, size: ef.size * s })};color:${color};text-decoration:${decoration};`
+    const extra = (font.highlight ? `background-color:${resolveColor(font.highlight, this.theme)};` : '')
+      + (font.spacing ? `letter-spacing:${font.spacing * s}px;` : '');
+    return `font:${fontCss({ ...ef, size: ef.size * s })};color:${color};text-decoration:${decoration};${extra}`
       + `vertical-align:${font.baseline === 'super' ? 'super' : font.baseline === 'sub' ? 'sub' : 'baseline'};line-height:inherit`;
   }
 
@@ -452,7 +454,7 @@ export class RichEditor {
   setFontProps(props) { return this.formatRange((f) => Object.assign(f, props)); }
   changeFontSize(dir) { return this.formatRange((f) => { f.size = stepFontSize(f.size, dir); }); }
   clearFormat() {
-    return this.formatRange((f) => { f.bold = false; f.italic = false; f.underline = false; f.strike = false; f.baseline = 0; });
+    return this.formatRange((f) => { f.bold = false; f.italic = false; f.underline = false; f.strike = false; f.baseline = 0; delete f.spacing; });
   }
 
   currentFont() { return this.selectionFonts()[0]; }

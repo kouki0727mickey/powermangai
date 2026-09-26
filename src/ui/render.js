@@ -27,7 +27,15 @@ export function measureText(font, text) {
     if (measureCache.size > 20000) measureCache.clear();
     measureCache.set(key, w);
   }
-  return w;
+  // 文字の間隔は 1 文字ごとに足す（描画の letterSpacing と同じ）
+  return font.spacing ? w + font.spacing * Array.from(text).length : w;
+}
+
+/** 蛍光ペンの色の帯（文字の高さ分） */
+function highlightRect(ctx, f, x, y, w, h, theme) {
+  if (!f.highlight) return;
+  ctx.fillStyle = resolveColor(f.highlight, theme);
+  ctx.fillRect(x, y, w, h);
 }
 
 // ---- 画像のキャッシュ（読み込み完了時に再描画を依頼）
@@ -79,8 +87,10 @@ function drawVertical(ctx, o, theme) {
       ctx.textBaseline = 'top';
       ctx.fillText(c.bullet.text, c.x, c.bullet.y);
     }
+    ctx.letterSpacing = '0px';
     for (const ch of c.chars) {
       const f = ch.font;
+      highlightRect(ctx, f, c.x - c.width / 2, ch.y, c.width, ch.adv, theme);
       ctx.font = fontCss(f);
       ctx.fillStyle = displayColor(f, theme);
       ctx.save();
@@ -114,10 +124,14 @@ export function drawTextLines(ctx, lines, theme) {
     }
     for (const s of ln.segs) {
       const f = s.font;
+      const base = f.base || f.size;
+      highlightRect(ctx, f, s.x, ln.baseline - base * 0.95, s.w, base * 1.2, theme);
       ctx.font = fontCss(f);
       ctx.fillStyle = displayColor(f, theme);
+      ctx.letterSpacing = `${f.spacing || 0}px`;
       const y = ln.baseline + (f.dy || 0);
       ctx.fillText(s.text, s.x, y);
+      ctx.letterSpacing = '0px';
       const lw = Math.max(1, f.base / 16);
       if ((f.underline || f.link) && s.text.trim()) ctx.fillRect(s.x, y + Math.max(1, f.base * 0.1), s.w, lw);
       if (f.strike && s.text.trim()) ctx.fillRect(s.x, y - f.size * 0.3, s.w, lw);

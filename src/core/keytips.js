@@ -42,6 +42,10 @@ const ARRANGE = {
 export const KEYTIPS = {
   label: 'リボン',
   children: [
+    // クイック アクセス ツール バー（既定: 上書き保存・元に戻す・やり直し）
+    { key: '1', label: '上書き保存（クイック アクセス）', action: 'save', qat: true },
+    { key: '2', label: '元に戻す（クイック アクセス）', action: 'undo', qat: true },
+    { key: '3', label: 'やり直し（クイック アクセス）', action: 'redo', qat: true },
     {
       key: 'F', label: 'ファイル',
       children: [
@@ -96,6 +100,8 @@ export const KEYTIPS = {
         },
         { key: 'E', label: 'すべての書式をクリア', action: 'clearFormat' },
         { key: 'FC', label: 'フォントの色', action: 'palette:fontColor' },
+        { key: 'TH', label: '蛍光ペンの色', action: 'palette:highlight' },
+        { key: 'FT', label: '文字の間隔', action: 'gallery:spacing' },
         { key: 'AL', label: '左揃え', action: 'alignLeft' },
         { key: 'AC', label: '中央揃え', action: 'alignCenter' },
         { key: 'AR', label: '右揃え', action: 'alignRight' },

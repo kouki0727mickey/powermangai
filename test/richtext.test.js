@@ -119,3 +119,14 @@ test('normalizeParagraph と applyFontAll', () => {
   applyFontAll(ps, (f) => { f.color = '#FF0000'; });
   assert.ok(ps.every((q) => q.runs[0].font.color === '#FF0000'));
 });
+
+test('蛍光ペン・文字の間隔が違う文字は別の run になり、不正な値は捨てる', async () => {
+  const { normalizePresentation, createPresentation } = await import('../src/core/model.js');
+  const p = createPresentation();
+  const o = p.slides[0].objects[0];
+  const f = o.paragraphs[0].runs[0].font;
+  o.paragraphs[0].runs = [{ text: 'a', font: { ...f, highlight: '#FFFF00' } }, { text: 'b', font: { ...f } }, { text: 'c', font: { ...f, spacing: 'x', highlight: 'red;x' } }];
+  const n = normalizePresentation(JSON.parse(JSON.stringify(p)));
+  const runs = n.slides[0].objects[0].paragraphs[0].runs;
+  assert.deepEqual(runs.map((r) => [r.text, r.font.highlight, r.font.spacing]), [['a', '#FFFF00', undefined], ['bc', undefined, undefined]]);
+});

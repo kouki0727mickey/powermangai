@@ -202,6 +202,8 @@ function checkFont(f) {
   for (const k of ['bold', 'italic', 'underline', 'strike']) out[k] = f[k] === true;
   out.baseline = f.baseline === 'super' || f.baseline === 'sub' ? f.baseline : 0;
   if (isLinkUrl(f.link)) out.link = f.link;
+  if (isColorValue(f.highlight)) out.highlight = f.highlight;
+  if (Number.isFinite(f.spacing) && f.spacing !== 0) out.spacing = Math.max(-20, Math.min(100, f.spacing));
   return out;
 }
 
