@@ -100,3 +100,14 @@ test('.pptx: すべての種類のグラフの往復と、埋め込みワーク�
   // buildPptxFiles は入れ子の ZIP を { zip } で返す
   assert.ok(buildPptxFiles(e.pres)['ppt/embeddings/Microsoft_Excel_Worksheet1.xlsx'].zip['xl/workbook.xml']);
 });
+
+test('.pptx: 上限を超える分類のグラフは警告を出す', async () => {
+  const e = new Editor(createPresentation());
+  e.insertChart('line');
+  const n = 1005;
+  e.selectedChart().chart.categories = Array.from({ length: n }, (_, i) => `d${i}`);
+  e.selectedChart().chart.series = [{ name: 's', values: Array.from({ length: n }, (_, i) => i) }];
+  const { pres, warnings } = await importPptx(await exportPptx(e.pres));
+  assert.equal(pres.slides[0].objects.at(-1).chart.categories.length, 1000);
+  assert.ok(warnings.some((w) => w.includes('1000')), JSON.stringify(warnings));
+});

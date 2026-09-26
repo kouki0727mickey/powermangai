@@ -24,8 +24,8 @@ export const isPieKind = (kind) => kind === 'pie' || kind === 'doughnut';
 export const isBarKind = (kind) => kind === 'bar' || kind === 'stackedBar';
 export const isStacked = (kind) => kind === 'stackedColumn' || kind === 'stackedBar';
 
-export const MAX_CATEGORIES = 100;
-export const MAX_SERIES = 50;
+export const MAX_CATEGORIES = 1000;
+export const MAX_SERIES = 255;
 const DOUGHNUT_HOLE = 0.5;
 
 /** 新しいグラフの既定のデータ（PowerPoint と同じ値） */
@@ -48,6 +48,11 @@ export function defaultChartData(kind = 'column') {
     gridlines: true,
     palette: 'colorful',
   };
+}
+
+/** タイトルの既定の文字（系列が 1 つなら系列名。PowerPoint と同じ） */
+export function defaultChartTitle(chart) {
+  return chart.series.length === 1 && chart.series[0].name ? chart.series[0].name : 'グラフ タイトル';
 }
 
 /** 系列（円グラフでは項目）の i 番目の色 */

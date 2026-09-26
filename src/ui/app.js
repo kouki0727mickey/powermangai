@@ -27,7 +27,7 @@ import {
 import { importPptx } from '../core/pptx-read.js';
 import { exportPptx } from '../core/pptx-write.js';
 import { tableLayout, CELL_INSET, cellDisplayFont } from '../core/table.js';
-import { CHART_KINDS, CHART_PALETTES, MAX_CATEGORIES, MAX_SERIES } from '../core/chart.js';
+import { CHART_KINDS, CHART_PALETTES, MAX_CATEGORIES, MAX_SERIES, defaultChartTitle } from '../core/chart.js';
 
 const FONT_FAMILIES = ['+major', '+minor', 'Yu Gothic UI', '游ゴシック', 'メイリオ', 'MS ゴシック', 'MS 明朝', 'BIZ UDPゴシック', 'Arial', 'Segoe UI', 'Times New Roman', 'Consolas'];
 const LINE_SPACINGS = [1, 1.5, 2, 2.5, 3];
@@ -868,6 +868,8 @@ const ACTIONS = {
   chartToggle: (prop) => {
     const o = editor.selectedChart();
     if (!o) return needChart();
+    // タイトルを消した後に表示し直すときは既定の文字に戻す（PowerPoint と同じ）
+    if (prop === 'showTitle' && !o.chart.showTitle && !o.chart.title) return editor.setChart({ showTitle: true, title: defaultChartTitle(o.chart) });
     return editor.setChart({ [prop]: !o.chart[prop] });
   },
   chartTitle: async () => {

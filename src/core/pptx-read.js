@@ -4,6 +4,7 @@ import { parseXml, kid, kids, path as xpath, textOf } from './xml.js';
 import { THEMES, checkCustomTheme, resolveColor, DEFAULT_THEME } from './colors.js';
 import { createObject, createPresentation, createSlide, normalizePresentation, SHAPE_TYPES, newId } from './model.js';
 import { defaultRunFont, normalizeParagraph, isLinkUrl } from './richtext.js';
+import { MAX_CATEGORIES, MAX_SERIES, defaultChartTitle } from './chart.js';
 
 const EMU = 12700;
 const pt = (v) => Math.round((Number(v) / EMU) * 100) / 100;
@@ -544,11 +545,12 @@ function cachePoints(ref) {
   const cache = ref && (xpath(ref, 'c:strRef/c:strCache') || xpath(ref, 'c:numRef/c:numCache') || xpath(ref, 'c:strLit') || xpath(ref, 'c:numLit')
     || xpath(ref, 'c:multiLvlStrRef/c:multiLvlStrCache/c:lvl'));
   if (!cache) return [];
-  const count = Math.min(1000, Number(kid(cache, 'c:ptCount')?.attrs.val) || 0);
+  // 上限を超えた分があることが分かるよう、上限 + 1 まで読む
+  const count = Math.min(MAX_CATEGORIES + 1, Number(kid(cache, 'c:ptCount')?.attrs.val) || 0);
   const out = new Array(count).fill(null);
   for (const p of kids(cache, 'c:pt')) {
     const i = Number(p.attrs.idx);
-    if (Number.isInteger(i) && i >= 0 && i < 1000) out[i] = textOf(kid(p, 'c:v'));
+    if (Number.isInteger(i) && i >= 0 && i < count) out[i] = textOf(kid(p, 'c:v'));
   }
   return out;
 }
@@ -577,10 +579,12 @@ export function readChart(cs, theme, warn = () => {}) {
     const markers = sers.some((s) => { const m = xpath(s, 'c:marker/c:symbol'); return !m || m.attrs.val !== 'none'; });
     kind = markers && kid(typeEl, 'c:marker')?.attrs.val !== '0' ? 'lineMarkers' : 'line';
   } else if (base === 'area' && grouping !== 'standard') warn('積み上げ面グラフ（面グラフとして読み込みました）');
+  if (sers.length > MAX_SERIES) warn(`系列が ${MAX_SERIES} 個を超えるグラフ（超えた分は読み込みませんでした）`);
   const catPts = cachePoints(kid(sers[0], 'c:cat'));
   const valPts = sers.map((s) => cachePoints(kid(s, 'c:val')));
   const nCat = Math.max(catPts.length, ...valPts.map((v) => v.length));
   if (!nCat) return null;
+  if (nCat > MAX_CATEGORIES) warn(`分類が ${MAX_CATEGORIES} 個を超えるグラフ（超えた分は読み込みませんでした）`);
   const categories = Array.from({ length: nCat }, (_, i) => catPts[i] ?? '');
   const series = sers.map((s, i) => {
     const tx = kid(s, 'c:tx');
@@ -597,7 +601,7 @@ export function readChart(cs, theme, warn = () => {}) {
   const showVal = (el) => xpath(el, 'c:dLbls/c:showVal')?.attrs.val === '1';
   return {
     kind, categories, series,
-    title: title || (series.length === 1 ? series[0].name : 'グラフ タイトル'),
+    title: title || defaultChartTitle({ series }),
     showTitle,
     showLegend: !!kid(chart, 'c:legend'),
     dataLabels: showVal(typeEl) || sers.some(showVal),

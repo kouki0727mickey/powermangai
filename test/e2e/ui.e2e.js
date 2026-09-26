@@ -1170,3 +1170,15 @@ test('グラフ: Alt → N → C で挿入、Enter でデータの編集、Alt �
   assert.equal((await chart()).title, 'グラフ タイトル');
   assert.deepEqual(errors, []);
 });
+
+test('グラフ タイトルを空にしてから Alt → J → C → A → T で表示し直すと既定の文字', async () => {
+  await fresh();
+  await ed(() => __pmg.editor.insertChart('column'));
+  await alt('j', 'c', 't');
+  await page.waitForSelector('.dialog input');
+  await keys('Control+a', 'Backspace', 'Enter');
+  const c = () => ed(() => __pmg.editor.selectedChart().chart);
+  assert.deepEqual([(await c()).title, (await c()).showTitle], ['', false]);
+  await alt('j', 'c', 'a', 't');
+  assert.deepEqual([(await c()).title, (await c()).showTitle], ['グラフ タイトル', true]);
+});
