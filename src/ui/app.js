@@ -167,7 +167,7 @@ function renderThumbs() {
     const c = document.createElement('canvas');
     c.width = Math.round(150 * dpr);
     c.height = Math.round(84 * dpr);
-    pane.append(h('div', { class: 'thumb' }, h('div', { class: 'section-head' }), h('div', { class: 'thumb-row' }, h('span', { class: 'num' }), c)));
+    pane.append(h('div', { class: 'thumb' }, h('div', { class: 'section-head' }), h('div', { class: 'thumb-row' }, h('span', { class: 'num' }), c), h('div', { class: 'section-head section-tail' })));
   }
   const heads = sectionHeads();
   thumbCache.length = slides.length;
@@ -180,6 +180,8 @@ function renderThumbs() {
     el.classList.toggle('hidden-slide', !!s.hidden);
     el.querySelector('.num').textContent = String(i + 1);
     setSectionHead(el.querySelector('.section-head'), heads.get(i));
+    // 末尾の空のセクションは最後のスライドの下に
+    setSectionHead(el.querySelector('.section-tail'), i === slides.length - 1 ? heads.get(slides.length) : undefined);
     const json = JSON.stringify(s) + editor.pres.theme + JSON.stringify(editor.pres.headerFooter) + i;
     if (thumbCache[i] !== json) {
       const c = el.querySelector('canvas');

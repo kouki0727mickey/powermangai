@@ -1218,3 +1218,16 @@ test('セクション（Alt → H → T → 1）: 追加・見出しの表示・
   assert.deepEqual(await heads(), ['既定のセクション（2）', '後半（3）']);
   assert.deepEqual(errors, []);
 });
+
+test('末尾の空のセクションもスライド一覧に表示される', async () => {
+  await fresh();
+  await keys('Control+m');
+  await alt('h', 't', '1', 'a');
+  await page.waitForSelector('.dialog input');
+  await keys('Enter');
+  await keys('F6', 'F6'); // ノート欄 → スライド一覧
+  assert.equal(await ed(() => __pmg.editor.pane), 'slides');
+  await keys('Control+ArrowUp'); // 2 枚目を前のセクションへ（並びは変わらない）
+  const names = await page.$$eval('#thumbs .section-head:not([hidden]) .section-name', (els) => els.map((e) => e.textContent));
+  assert.deepEqual(names, ['既定のセクション（2）', 'タイトルなしのセクション（0）']);
+});

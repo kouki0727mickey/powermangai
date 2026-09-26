@@ -1286,6 +1286,7 @@ export class Editor {
     this.slideAnchor = first;
     this.slideSel = sec.slideIds.length > 1 ? [...sec.slideIds] : null;
     this.selection = [];
+    this.editingId = null;
     this.emit();
     return true;
   }
