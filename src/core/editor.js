@@ -63,7 +63,8 @@ export class Editor {
     const presBefore = JSON.stringify(this.pres);
     const result = fn();
     this.fitAll();
-    if (JSON.stringify(this.pres) !== presBefore) {
+    // 文字の編集中の変更は、編集の終了時に編集全体と合わせて 1 回の操作として履歴に積む
+    if (!this.editingId && JSON.stringify(this.pres) !== presBefore) {
       this.undoStack.push(before);
       if (this.undoStack.length > HISTORY_LIMIT) this.undoStack.shift();
       this.redoStack = [];
@@ -271,9 +272,10 @@ export class Editor {
         const next = nextCase(objText(o));
         // ランの境界を保ったまま文字だけ置き換える（大文字小文字の変換で文字数は変わらない前提。変わる場合は全体を置換）
         if (next.length === objText(o).length) {
+          // 位置は UTF-16 のコード単位でそろえる（絵文字などのサロゲートペアも 2 単位として数える）
           let k = 0;
           const flat = next.replace(/\n/g, '');
-          for (const p of o.paragraphs) for (const r of p.runs) { r.text = Array.from(r.text).map((ch) => (ch === '\n' ? ch : flat[k++])).join(''); }
+          for (const p of o.paragraphs) for (const r of p.runs) { r.text = r.text.split('').map((ch) => (ch === '\n' ? ch : flat[k++])).join(''); }
         } else {
           o.paragraphs = fromPlainText(next, o.paragraphs[0].runs[0].font, { align: o.paragraphs[0].align });
         }

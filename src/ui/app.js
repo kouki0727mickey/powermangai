@@ -433,7 +433,13 @@ const ACTIONS = {
   ),
   fontDialog: fmt(
     () => keepTextSelection(async () => { const r = await openFontDialog(rich.currentFont(), FONT_FAMILIES, editor.theme); if (r) rich.setFontProps(r); }),
-    async () => { const r = await openFontDialog(currentFont(), FONT_FAMILIES, editor.theme); if (r) editor.setFontProps(r); return true; },
+    async () => {
+      const font = currentFont();
+      if (!font) return false;
+      const r = await openFontDialog(font, FONT_FAMILIES, editor.theme);
+      if (r) editor.setFontProps(r);
+      return true;
+    },
   ),
 
   // 図形

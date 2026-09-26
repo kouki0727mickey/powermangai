@@ -465,7 +465,8 @@ export class RichEditor {
         for (const r of this.paras[i].runs) {
           const rs = pos;
           pos += r.text.length;
-          r.text = Array.from(r.text).map((ch, j) => (rs + j >= s && rs + j < e ? next[k++] : ch)).join('');
+          // DOM の位置と同じく UTF-16 のコード単位で数える
+          r.text = r.text.split('').map((ch, j) => (rs + j >= s && rs + j < e ? next[k++] : ch)).join('');
         }
         k += 1; // 段落の区切り
       }

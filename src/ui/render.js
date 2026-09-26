@@ -96,7 +96,7 @@ function placeholderView(o) {
 }
 
 function drawTable(ctx, o, theme) {
-  const lay = tableLayout(o);
+  const lay = tableLayout(o, measureText, theme);
   const accent = resolveColor('@accent1', theme);
   o.cells.forEach((row, r) => row.forEach((cell, c) => {
     const x = lay.xs[c], y = lay.ys[r], w = o.colWidths[c], h = lay.heights[r];

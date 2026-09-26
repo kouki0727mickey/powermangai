@@ -225,6 +225,12 @@ function checkObject(o) {
     if (o.align !== undefined && !ALIGNS.includes(o.align)) fail('文字の配置が不正です');
     obj = createObject(o.type, { ...o, text: String(o.text ?? ''), font: legacyFont });
     for (const k of ['fill', 'stroke']) if (typeof obj[k] === 'string' && obj[k] === '#4472C4') obj[k] = '@accent1';
+    // 旧形式には自動調整がなかったので、保存されたサイズを保つ
+    obj.autoFit = 'none';
+    // 旧形式のプレースホルダーには種類がないので、プロンプト文字から判断する
+    if (typeof o.placeholder === 'string' && !o.ph) {
+      obj.ph = o.placeholder.includes('サブタイトル') ? 'subTitle' : o.placeholder.includes('タイトル') ? 'title' : 'body';
+    }
   }
   for (const key of ['x', 'y', 'w', 'h', 'rotation', 'strokeWidth', 'opacity']) {
     if (!Number.isFinite(obj[key])) fail(`数値が不正です: ${key}`);

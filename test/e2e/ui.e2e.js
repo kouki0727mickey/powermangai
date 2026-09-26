@@ -450,3 +450,21 @@ test('図形を選択したまま Ctrl+B / 箇条書き / Ctrl+1 は図形内の
   assert.ok(ps.every((p) => p.runs.every((r) => r.bold) && p.bullet === 'bullet' && p.lineSpacing === 1.5));
   assert.deepEqual(errors, []);
 });
+
+test('直線だけ選択して Ctrl+T でもエラーにならない', async () => {
+  await fresh();
+  await alt('n', 's', 'h');
+  await keys('End', 'ArrowLeft', 'ArrowLeft', 'Enter'); // 直線
+  assert.equal(await ed(() => __pmg.editor.selectedObjects()[0].type), 'line');
+  await keys('Control+t');
+  assert.equal(await page.$('#fd-size'), null);
+  assert.deepEqual(errors, []);
+});
+
+test('入力中の Shift+F3 は絵文字の後ろの選択範囲も正しく変換', async () => {
+  await fresh();
+  await newTextBox('😀 ab cd');
+  await keys('Shift+ArrowLeft', 'Shift+ArrowLeft', 'Shift+F3');
+  const ps = await runsOf();
+  assert.equal(ps[0].runs.map((r) => r.text).join(''), '😀 ab Cd');
+});

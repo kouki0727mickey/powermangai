@@ -175,6 +175,11 @@ test('旧形式（version 1）のファイルを読み込める', () => {
   assert.equal(objFont(o).size, 30);
   assert.equal(objFont(o).family, '+minor');
   assert.equal(pres.theme, 'office');
+  assert.equal(o.autoFit, 'none', '旧形式は保存されたサイズを保つ');
+  const ph = normalizePresentation({ version: 1, slides: [{ objects: [
+    { type: 'text', text: '', placeholder: 'タイトルを入力' }, { type: 'text', text: '', placeholder: 'サブタイトルを入力' }, { type: 'text', text: '', placeholder: 'テキストを入力' },
+  ] }] }).slides[0].objects.map((x) => x.ph);
+  assert.deepEqual(ph, ['title', 'subTitle', 'body']);
 });
 
 test('新形式の検証: 段落・ラン・スライドの属性', () => {
@@ -211,4 +216,25 @@ test('4:3 のスライドではレイアウトと配置が幅 720 基準', () =>
 
 test('approxMeasure は全角を 1em、半角を 0.55em で数える', () => {
   assert.equal(approxMeasure({ size: 10 }, 'あa'), 15.5);
+});
+
+test('Shift+F3 は絵文字を含む文字でも崩れない', () => {
+  const ed = new Editor(createPresentation());
+  ed.insertObject('text', { text: 'abc 😀 def' });
+  ed.changeCase();
+  assert.equal(objText(ed.selectedObjects()[0]), 'Abc 😀 Def');
+});
+
+test('編集中の図形の変更は、編集全体と合わせて 1 回の Undo になる', () => {
+  const ed = new Editor(createPresentation());
+  const t = ed.insertObject('text', { text: 'a' });
+  const undoBefore = ed.undoStack.length;
+  ed.startEdit();
+  ed.previewEdit(fromPlainText('ab', defaultRunFont()));
+  ed.setObjectProp('anchor', 'bottom');
+  ed.endEdit(fromPlainText('abc', defaultRunFont()));
+  assert.equal(ed.undoStack.length, undoBefore + 1);
+  ed.undo();
+  assert.equal(objText(ed.findObject(t.id)), 'a');
+  assert.equal(ed.findObject(t.id).anchor, 'top');
 });
