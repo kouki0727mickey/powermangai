@@ -6,6 +6,7 @@ import {
 } from '../core/model.js';
 import { findTheme, THEMES } from '../core/colors.js';
 import { findAll, compareMatchPos } from '../core/search.js';
+import { buildSteps, stepDuration, objectStyler, transitionFrame, TRANSITIONS, EFFECTS, DIRECTION_LABELS, TRIGGER_LABELS } from '../core/animation.js';
 import { keyCandidates, findBinding, prettyKey, MODIFIER_KEYS } from '../core/keys.js';
 import { BINDINGS, MOVE_STEP, bindingsByCategory } from '../core/shortcuts.js';
 import { KeyTipSession, KEYTIPS, keyTipPaths } from '../core/keytips.js';
@@ -15,7 +16,8 @@ import { drawSlide, drawSelection, drawObject, slideToDataUrl, measureText, setI
 import { RichEditor } from './richeditor.js';
 import {
   activeDialog, openPalette, openShapeGallery, openGallery, openInput, openList, openConfirm,
-  openContent, openHelp, openFontDialog, openSelectionPane, openFormatShape, openTablePicker, openFindReplace, openHeaderFooter, h,
+  openContent, openHelp, openFontDialog, openSelectionPane, openFormatShape, openTablePicker, openFindReplace, openHeaderFooter,
+  openAnimationPane, h,
 } from './dialogs.js';
 import { openPresentationFile, savePresentationFile, openImageFile, setFullScreen, readSystemClipboard, writeSystemClipboardText, imageSize, printDocument } from './platform.js';
 import { tableLayout, CELL_INSET, cellDisplayFont } from '../core/table.js';
@@ -888,6 +890,76 @@ const ACTIONS = {
     if (r) editor.setHeaderFooter(r);
   },
 
+  // 画面切り替え
+  'gallery:transition': async () => {
+    const cur = editor.slide.transition?.type || 'none';
+    const v = await openList('画面切り替え', TRANSITIONS.map((t) => ({ label: t.label, value: t.id })), { initial: TRANSITIONS.findIndex((t) => t.id === cur) });
+    if (!v) return;
+    editor.setTransition({ type: v, direction: undefined });
+    setStatus(v === 'none' ? '画面切り替えを解除しました' : `画面切り替え「${TRANSITIONS.find((t) => t.id === v).label}」を設定しました（Alt → K → P でプレビュー）`);
+  },
+  transitionOptions: async () => {
+    const tr = editor.slide.transition;
+    const def = tr && TRANSITIONS.find((t) => t.id === tr.type);
+    if (!def?.directions) { setStatus('この画面切り替えには効果のオプションがありません'); return; }
+    const v = await openList('効果のオプション', def.directions.map((d) => ({ label: DIRECTION_LABELS[d], value: d })));
+    if (v) editor.setTransition({ direction: v });
+  },
+  'input:transitionDuration': async () => {
+    if (!editor.slide.transition) { setStatus('先に画面切り替えを設定してください（Alt → K → T）'); return; }
+    const v = await inputSeconds('期間（秒）', editor.slide.transition.duration);
+    if (v !== null) editor.setTransition({ duration: v });
+  },
+  transitionApplyAll: () => {
+    const tr = editor.slide.transition;
+    editor.setTransition(tr ? { ...tr } : { type: 'none' }, true);
+    setStatus('すべてのスライドに同じ画面切り替えを設定しました');
+  },
+  previewSlide: () => startShow(editor.slideIndex, { windowed: true, preview: true }),
+
+  // アニメーション
+  'gallery:animation': async () => {
+    if (!editor.selection.length) return needSelection();
+    const v = await openList('アニメーション（開始）', [{ label: 'なし', value: 'none' }, ...EFFECTS.map((x) => ({ label: x.label, value: x.id }))]);
+    if (!v) return;
+    editor.setAnimation(v === 'none' ? null : v);
+    if (v !== 'none') setStatus('アニメーションを設定しました（Alt → A → M で順番、Alt → A → P でプレビュー）');
+  },
+  animationOptions: async () => {
+    const ids = new Set(editor.animTargets());
+    const a = editor.slide.animations.find((x) => ids.has(x.target));
+    if (!a) { setStatus('アニメーションが設定された図形を選択してください'); return; }
+    const def = EFFECTS.find((x) => x.id === a.effect);
+    if (!def?.directions) { setStatus('このアニメーションには効果のオプションがありません'); return; }
+    const v = await openList('効果のオプション', def.directions.map((d) => ({ label: DIRECTION_LABELS[d], value: d })));
+    if (v) editor.updateAnimation({ direction: v });
+  },
+  animationTrigger: async () => {
+    const v = await openList('開始のタイミング', Object.entries(TRIGGER_LABELS).map(([value, label]) => ({ label, value })));
+    if (v && !editor.updateAnimation({ trigger: v })) setStatus('アニメーションが設定された図形を選択してください');
+  },
+  'input:animationDuration': async () => {
+    const ids = new Set(editor.animTargets());
+    const a = editor.slide.animations.find((x) => ids.has(x.target));
+    if (!a) { setStatus('アニメーションが設定された図形を選択してください'); return; }
+    const v = await inputSeconds('継続時間（秒）', a.duration);
+    if (v !== null) editor.updateAnimation({ duration: v });
+  },
+  animationPane: async () => {
+    commitEdit();
+    const name = (id) => { const o = editor.findObject(id); return o ? displayName(o, editor.slide) : '?'; };
+    await openAnimationPane({
+      items: () => editor.slide.animations.map((a) => ({
+        label: `${EFFECTS.find((x) => x.id === a.effect)?.label}: ${name(a.target)}`,
+        sub: `${TRIGGER_LABELS[a.trigger]} ／ ${a.duration} 秒${a.direction ? ` ／ ${DIRECTION_LABELS[a.direction]}` : ''}`,
+      })),
+      move: (i, dir) => editor.moveAnimation(i, dir),
+      remove: (i) => editor.removeAnimationAt(i),
+      trigger: (i, t) => editor.setAnimationAt(i, { trigger: t }),
+      select: (i) => editor.setSelection([editor.slide.animations[i].target]),
+    });
+  },
+
   // 検索・置換
   find: () => findReplace(false),
   replace: () => findReplace(true),
@@ -1018,6 +1090,14 @@ async function printSlides(kind, withHidden) {
     root.hidden = true;
     root.textContent = '';
   }
+}
+
+async function inputSeconds(title, value) {
+  const v = await openInput(title, {
+    value,
+    validate: (x) => (Number.isFinite(Number(x)) && Number(x) > 0 && Number(x) <= 60 ? null : '0 より大きく 60 以下の秒数を入力してください'),
+  });
+  return v === null ? null : Math.round(Number(v) * 100) / 100;
 }
 
 function chooseLayout(title) {
@@ -1224,21 +1304,28 @@ function visibleSlide(index, dir) {
   return i;
 }
 
-function startShow(from, { windowed = false, fromStart = false } = {}) {
+/**
+ * スライドショーの状態:
+ *   index（表示中のスライド。スライド数と同じなら「最後です」画面）、steps（アニメーションのステップ）、
+ *   done（再生済みのステップ数）、playing（{ step, start } 再生中）、trans（{ prev: canvas, start, tr } 画面切り替え中）
+ */
+function startShow(from, { windowed = false, fromStart = false, preview = false } = {}) {
   commitEdit();
   leaveNotes();
   // 最初からのときは非表示スライドを飛ばす（現在のスライドからのときは、そのスライドを表示）
   const index = fromStart ? visibleSlide(0, 1) : from;
-  app.show = { index, cover: '', digits: '', windowed };
+  app.show = { index: -1, cover: '', digits: '', windowed, preview, steps: [], done: 0, playing: null, trans: null };
   $('slideshow').hidden = false;
   if (!windowed) setFullScreen(true);
-  renderShow();
+  sizeShowCanvas();
+  enterShowSlide(index, { transition: true });
   // 全画面切り替え後のサイズで描き直す
-  setTimeout(renderShow, 300);
+  setTimeout(() => { sizeShowCanvas(); renderShow(); }, 300);
 }
 
 function endShow() {
   const windowed = app.show?.windowed;
+  if (app.show?.raf) cancelAnimationFrame(app.show.raf);
   app.show = null;
   $('slideshow').hidden = true;
   if (!windowed) setFullScreen(false);
@@ -1246,9 +1333,7 @@ function endShow() {
   focusSink();
 }
 
-function renderShow() {
-  if (!app.show) return;
-  const { index, cover } = app.show;
+function sizeShowCanvas() {
   const vw = window.innerWidth, vh = window.innerHeight;
   const { width: SW, height: SH } = editor.size;
   const scale = Math.min(vw / SW, vh / SH);
@@ -1258,19 +1343,135 @@ function renderShow() {
   showCanvas.height = Math.round(hgt * dpr);
   showCanvas.style.width = `${w}px`;
   showCanvas.style.height = `${hgt}px`;
+}
+
+/** スライドに入る。transition: 画面切り替えを再生する / allDone: アニメーションを最後まで済ませた状態で表示 */
+function enterShowSlide(index, { transition = false, allDone = false } = {}) {
+  const s = app.show;
+  const slide = editor.pres.slides[index];
+  let prev = null;
+  if (transition && slide?.transition) {
+    // 直前の画面を画像として保持（最初のスライドは黒から）
+    prev = document.createElement('canvas');
+    prev.width = showCanvas.width; prev.height = showCanvas.height;
+    const pctx = prev.getContext('2d');
+    if (s.index >= 0) pctx.drawImage(showCanvas, 0, 0);
+    else { pctx.fillStyle = '#000'; pctx.fillRect(0, 0, prev.width, prev.height); }
+  }
+  s.index = index;
+  s.cover = '';
+  s.steps = slide ? buildSteps(slide.animations || []) : [];
+  s.done = allDone ? s.steps.length : 0;
+  s.playing = null;
+  s.trans = prev ? { prev, start: performance.now(), tr: slide.transition } : null;
+  if (!s.trans && !allDone) startAutoStep();
+  tickShow();
+}
+
+/** 先頭のステップが自動再生なら開始 */
+function startAutoStep() {
+  const s = app.show;
+  if (s.done === 0 && s.steps[0]?.auto) s.playing = { step: 0, start: performance.now() };
+}
+
+/** 次へ: 再生中なら完了させる → 次のステップ → 次のスライド */
+function showNext() {
+  const s = app.show;
+  const last = editor.pres.slides.length - 1;
+  if (s.trans) { s.trans = null; startAutoStep(); tickShow(); return; }
+  if (s.playing) { s.done = s.playing.step + 1; s.playing = null; tickShow(); return; }
+  if (s.index <= last && s.done < s.steps.length) {
+    s.playing = { step: s.done, start: performance.now() };
+    tickShow();
+    return;
+  }
+  if (s.index > last) { endShow(); return; }
+  const next = visibleSlide(s.index + 1, 1);
+  if (next > last) { s.index = last + 1; s.steps = []; tickShow(); return; }
+  enterShowSlide(next, { transition: true });
+}
+
+/** 前へ: 再生済みのステップを 1 つ戻す → 前のスライド（アニメーションは済んだ状態） */
+function showPrev() {
+  const s = app.show;
+  if (s.trans) s.trans = null;
+  if (s.playing) { s.playing = null; tickShow(); return; }
+  if (s.index < editor.pres.slides.length && s.done > 0) { s.done -= 1; tickShow(); return; }
+  const prev = visibleSlide(Math.min(s.index, editor.pres.slides.length) - 1, -1);
+  if (prev >= 0) enterShowSlide(prev, { allDone: true });
+}
+
+/** 画面切り替え・アニメーションの再生中は毎フレーム描画する */
+function tickShow() {
+  const s = app.show;
+  if (!s) return;
+  if (s.raf) cancelAnimationFrame(s.raf);
+  s.raf = null;
+  const now = performance.now();
+  if (s.trans && (now - s.trans.start) / 1000 >= s.trans.tr.duration) { s.trans = null; startAutoStep(); }
+  if (s.playing) {
+    const dur = stepDuration(s.steps[s.playing.step]);
+    if ((now - s.playing.start) / 1000 >= dur) {
+      s.done = s.playing.step + 1;
+      s.playing = null;
+      // 続くステップが「クリック時」でなければ（自動）続けて再生
+      if (s.steps[s.done]?.auto) s.playing = { step: s.done, start: now };
+    }
+  }
+  renderShow(now);
+  if (s.trans || s.playing) s.raf = requestAnimationFrame(tickShow);
+  else if (s.preview) {
+    // プレビュー: 次のステップを自動で再生し、最後まで再生したら終了
+    s.raf = requestAnimationFrame(() => {
+      if (!app.show) return;
+      if (s.done < s.steps.length) { s.playing = { step: s.done, start: performance.now() }; tickShow(); } else setTimeout(() => app.show === s && endShow(), 500);
+    });
+  }
+}
+
+function drawShowSlide(ctx, index, now) {
+  const s = app.show;
+  const slide = editor.pres.slides[index];
+  const t = s.playing ? (now - s.playing.start) / 1000 : 0;
+  const styler = objectStyler(slide, s.steps, s.done, s.playing ? s.playing.step : null, t, editor.size);
+  drawSlide(ctx, slide, ctx.canvas.width, ctx.canvas.height, { pres: editor.pres, index, objectStyle: styler });
+}
+
+function renderShow(now = performance.now()) {
+  const s = app.show;
+  if (!s) return;
   const ctx = showCanvas.getContext('2d');
-  if (index >= editor.pres.slides.length) {
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (s.index >= editor.pres.slides.length || s.index < 0) {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, showCanvas.width, showCanvas.height);
     ctx.fillStyle = '#fff';
     ctx.font = `${16 * dpr}px sans-serif`;
     ctx.fillText('スライド ショーの最後です。次へ進むと終了します。', 20 * dpr, 40 * dpr);
+  } else if (s.trans) {
+    const W = showCanvas.width, H = showCanvas.height;
+    const next = document.createElement('canvas');
+    next.width = W; next.height = H;
+    drawShowSlide(next.getContext('2d'), s.index, now);
+    const p = Math.min(1, (now - s.trans.start) / 1000 / s.trans.tr.duration);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    for (const layer of transitionFrame(s.trans.tr, p, W, H)) {
+      const src = layer.slide === 'prev' ? s.trans.prev : next;
+      ctx.save();
+      if (layer.clip) { ctx.beginPath(); ctx.rect(layer.clip.x, layer.clip.y, layer.clip.w, layer.clip.h); ctx.clip(); }
+      ctx.globalAlpha = layer.alpha ?? 1;
+      const k = layer.scale ?? 1;
+      ctx.translate(W / 2 + (layer.dx || 0), H / 2 + (layer.dy || 0));
+      ctx.scale(k, k);
+      ctx.drawImage(src, -W / 2, -H / 2);
+      ctx.restore();
+    }
   } else {
-    drawSlide(ctx, editor.pres.slides[index], showCanvas.width, showCanvas.height, { pres: editor.pres, index });
+    drawShowSlide(ctx, s.index, now);
   }
-  const cv = $('show-cover');
-  cv.className = cover;
+  $('show-cover').className = s.cover;
 }
 
 function handleShowKey(e) {
@@ -1280,7 +1481,7 @@ function handleShowKey(e) {
   if (e.key === 'Enter' && s.digits) {
     const n = Number(s.digits);
     s.digits = '';
-    if (n >= 1 && n <= editor.pres.slides.length) { s.index = n - 1; s.cover = ''; renderShow(); }
+    if (n >= 1 && n <= editor.pres.slides.length) enterShowSlide(n - 1);
     return;
   }
   s.digits = '';
@@ -1290,27 +1491,36 @@ function handleShowKey(e) {
   const last = editor.pres.slides.length - 1;
   switch (b.action) {
     case 'showNext':
-      if (s.cover) { s.cover = ''; break; }
-      if (s.index > last) { endShow(); return; }
-      s.index = Math.min(last + 1, visibleSlide(s.index + 1, 1));
-      break;
-    case 'showPrev': {
-      if (s.cover) { s.cover = ''; break; }
-      const prev = visibleSlide(Math.min(s.index, last + 1) - 1, -1);
-      if (prev >= 0) s.index = prev;
-      break;
-    }
-    case 'showFirst': s.index = Math.max(0, visibleSlide(0, 1)); s.cover = ''; break;
-    case 'showLast': { const v = visibleSlide(last, -1); s.index = v >= 0 ? v : last; s.cover = ''; break; }
+      if (s.cover) { s.cover = ''; renderShow(); return; }
+      showNext();
+      return;
+    case 'showPrev':
+      if (s.cover) { s.cover = ''; renderShow(); return; }
+      showPrev();
+      return;
+    case 'showFirst': enterShowSlide(Math.max(0, visibleSlide(0, 1))); return;
+    case 'showLast': { const v = visibleSlide(last, -1); enterShowSlide(v >= 0 ? v : last); return; }
     case 'showBlack': s.cover = s.cover === 'black' ? '' : 'black'; break;
     case 'showWhite': s.cover = s.cover === 'white' ? '' : 'white'; break;
     case 'showEnd': endShow(); return;
+    case 'showAll': {
+      const items = editor.pres.slides.map((sl, i) => ({
+        label: `${i + 1}. ${objText(sl.objects.find((o) => o.ph === 'title' || o.ph === 'ctrTitle') || { paragraphs: [{ runs: [{ text: '' }] }] }) || '（タイトルなし）'}`,
+        sub: sl.hidden ? '非表示' : '',
+        value: i + 1,
+      }));
+      openList('すべてのスライド', items, { initial: Math.min(s.index, items.length - 1) }).then((v) => { if (v && app.show) enterShowSlide(v - 1); });
+      return;
+    }
+    case 'showHidden':
+      if (s.index + 1 < editor.pres.slides.length && editor.pres.slides[s.index + 1].hidden && !s.playing) enterShowSlide(s.index + 1, { transition: true });
+      return;
     default: return;
   }
   renderShow();
 }
 
-window.addEventListener('resize', () => { layout(); renderShow(); });
+window.addEventListener('resize', () => { layout(); if (app.show) { sizeShowCanvas(); renderShow(); } });
 
 // ------------------------------------------------------------------ 練習モード
 function bestKey(id) { return `pmg.best.${id}`; }
@@ -1465,13 +1675,14 @@ function onKeyDown(e) {
   if (e.isComposing || e.keyCode === 229) return;
   if (!MODIFIER_KEYS.has(e.key) && !e.repeat) { app.practice.keys += 1; renderStats(); }
 
-  if (app.show) { handleShowKey(e); return; }
-
+  // ダイアログはスライドショー中（すべてのスライドの一覧など）にも表示される
   const dlg = activeDialog();
   if (dlg) {
     if (dlg.handleKey(e)) e.preventDefault();
     return;
   }
+
+  if (app.show) { handleShowKey(e); return; }
 
   if (app.keytips) { handleKeytipKey(e); return; }
 

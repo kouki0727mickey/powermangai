@@ -737,3 +737,45 @@ export function openHeaderFooter(hf) {
   };
   return d.show();
 }
+
+// ---------------------------------------------------------------- アニメーション ウィンドウ
+/**
+ * api: { items() → [{ label, sub }], move(i, dir), remove(i), trigger(i, t), select(i) }
+ */
+export function openAnimationPane(api) {
+  const d = new Dialog('アニメーション ウィンドウ', '↑↓: 移動 ／ Ctrl+↑↓: 順番の変更 ／ C / W / A: クリック時・同時・後 ／ Delete: 削除 ／ Space: 図形を選択 ／ Enter・Esc: 閉じる', { side: true });
+  const ul = h('ul', { class: 'list' });
+  d.body.append(ul);
+  let sel = 0;
+  const render = () => {
+    const items = api.items();
+    sel = Math.max(0, Math.min(items.length - 1, sel));
+    ul.textContent = '';
+    if (!items.length) ul.append(h('li', { text: 'このスライドにはアニメーションがありません（Alt → A → S で追加）' }));
+    items.forEach((it, i) => ul.append(h('li', { class: i === sel ? 'sel' : '' }, h('span', { text: `${i + 1}.` }), h('span', { text: it.label }), h('span', { class: 'sub', text: it.sub }))));
+    ul.children[sel]?.scrollIntoView({ block: 'nearest' });
+  };
+  d.handleKey = (e) => {
+    const n = api.items().length;
+    switch (e.key) {
+      case 'Escape': case 'Enter': d.close(true); return true;
+      case 'ArrowDown':
+        if (e.ctrlKey) { if (api.move(sel, 1)) sel += 1; } else sel = Math.min(n - 1, sel + 1);
+        break;
+      case 'ArrowUp':
+        if (e.ctrlKey) { if (api.move(sel, -1)) sel -= 1; } else sel = Math.max(0, sel - 1);
+        break;
+      case 'Delete': case 'Backspace': if (n) api.remove(sel); break;
+      case ' ': if (n) api.select(sel); break;
+      default: {
+        const t = { c: 'click', w: 'with', a: 'after' }[e.key.toLowerCase()];
+        if (t && n && !e.ctrlKey && !e.altKey) api.trigger(sel, t);
+        else return true;
+      }
+    }
+    render();
+    return true;
+  };
+  render();
+  return d.show();
+}

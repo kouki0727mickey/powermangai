@@ -118,6 +118,8 @@ export const BINDINGS = [
   { action: 'showBlack', keys: ['B', '.'], contexts: ['show'], category: 'スライドショー', label: '黒い画面の表示 / 解除' },
   { action: 'showWhite', keys: ['W', ','], contexts: ['show'], category: 'スライドショー', label: '白い画面の表示 / 解除' },
   { action: 'showEnd', keys: ['Escape', '-'], contexts: ['show'], category: 'スライドショー', label: 'スライドショーの終了' },
+  { action: 'showAll', keys: ['Ctrl+S'], contexts: ['show'], category: 'スライドショー', label: 'すべてのスライド（一覧から移動）' },
+  { action: 'showHidden', keys: ['H'], contexts: ['show'], category: 'スライドショー', label: '次のスライドが非表示スライドなら表示' },
 
   // 練習モード（このアプリ独自）
   { action: 'help', keys: ['F1', 'Ctrl+/'], contexts: ALL, category: '練習', label: 'ショートカット一覧' },

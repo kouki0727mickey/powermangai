@@ -162,6 +162,27 @@ export const KEYTIPS = {
       ],
     },
     {
+      key: 'K', label: '画面切り替え',
+      children: [
+        { key: 'T', label: '画面切り替えの種類', action: 'gallery:transition' },
+        { key: 'O', label: '効果のオプション（方向）', action: 'transitionOptions' },
+        { key: 'D', label: '期間', action: 'input:transitionDuration' },
+        { key: 'L', label: 'すべてに適用', action: 'transitionApplyAll' },
+        { key: 'P', label: 'プレビュー', action: 'previewSlide' },
+      ],
+    },
+    {
+      key: 'A', label: 'アニメーション',
+      children: [
+        { key: 'S', label: 'アニメーションの種類（開始効果）', action: 'gallery:animation' },
+        { key: 'O', label: '効果のオプション（方向）', action: 'animationOptions' },
+        { key: 'T', label: '開始のタイミング', action: 'animationTrigger' },
+        { key: 'D', label: '継続時間', action: 'input:animationDuration' },
+        { key: 'M', label: 'アニメーション ウィンドウ', action: 'animationPane' },
+        { key: 'P', label: 'プレビュー', action: 'previewSlide' },
+      ],
+    },
+    {
       key: 'S', label: 'スライドショー',
       children: [
         { key: 'B', label: '最初から', action: 'showFromStart' },

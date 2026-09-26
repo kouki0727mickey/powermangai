@@ -3,6 +3,10 @@ import {
   defaultRunFont, fromPlainText, plainText, normalizeParagraph, ALIGNS, BULLETS, MAX_LEVEL,
 } from './richtext.js';
 import { isColorValue, THEMES } from './colors.js';
+import { TRANSITIONS, EFFECTS } from './animation.js';
+
+const TRANSITION_IDS = new Set(TRANSITIONS.map((t) => t.id));
+const EFFECT_IDS = new Set(EFFECTS.map((e) => e.id));
 
 export const SLIDE_W = 960; // 16:9（13.333 × 7.5 インチ）を 1pt = 1px で表す
 export const SLIDE_H = 540;
@@ -288,14 +292,19 @@ function checkSlide(s, size) {
   slide.background = s.background == null ? null : isColorValue(s.background) ? s.background : fail('背景の色が不正です');
   slide.notes = typeof s.notes === 'string' ? s.notes : '';
   slide.hidden = s.hidden === true;
-  if (s.transition && typeof s.transition === 'object' && typeof s.transition.type === 'string') {
-    slide.transition = { type: s.transition.type, duration: Number.isFinite(s.transition.duration) ? s.transition.duration : 0.7 };
+  const dirOk = (d) => ['fromBottom', 'fromTop', 'fromLeft', 'fromRight'].includes(d);
+  const dur = (d, def) => (Number.isFinite(d) && d > 0 && d <= 60 ? d : def);
+  if (s.transition && typeof s.transition === 'object' && TRANSITION_IDS.has(s.transition.type) && s.transition.type !== 'none') {
+    slide.transition = { type: s.transition.type, duration: dur(s.transition.duration, 0.7), direction: dirOk(s.transition.direction) ? s.transition.direction : undefined };
   }
   if (Array.isArray(s.animations)) {
     const ids = new Set(slide.objects.map((o) => o.id));
     slide.animations = s.animations
-      .filter((a) => a && ids.has(a.target) && typeof a.effect === 'string')
-      .map((a) => ({ target: a.target, effect: a.effect, trigger: ['click', 'with', 'after'].includes(a.trigger) ? a.trigger : 'click', duration: Number.isFinite(a.duration) ? a.duration : 0.5 }));
+      .filter((a) => a && ids.has(a.target) && EFFECT_IDS.has(a.effect))
+      .map((a) => ({
+        target: a.target, effect: a.effect, trigger: ['click', 'with', 'after'].includes(a.trigger) ? a.trigger : 'click',
+        duration: dur(a.duration, 0.5), direction: dirOk(a.direction) ? a.direction : undefined,
+      }));
   }
   return slide;
 }

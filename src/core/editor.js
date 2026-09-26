@@ -65,6 +65,7 @@ export class Editor {
     const presBefore = JSON.stringify(this.pres);
     const result = fn();
     this.fitAll();
+    this.pruneAnimations();
     // 文字の編集中の変更は、編集の終了時に編集全体と合わせて 1 回の操作として履歴に積む
     if (!this.editingId && JSON.stringify(this.pres) !== presBefore) {
       this.undoStack.push(before);
@@ -83,6 +84,15 @@ export class Editor {
     if (o.autoFit !== 'shape' || !hasText(o)) return;
     const h = Math.round(layoutObjectText(o, this.measure, this.theme).contentHeight * 10) / 10;
     if (Math.abs(o.h - h) > 0.05) o.h = h;
+  }
+
+  /** 削除されたオブジェクトを対象にしたアニメーションを取り除く */
+  pruneAnimations() {
+    for (const s of this.pres.slides) {
+      if (!s.animations || !s.animations.length) continue;
+      const ids = new Set(s.objects.map((o) => o.id));
+      if (s.animations.some((a) => !ids.has(a.target))) s.animations = s.animations.filter((a) => ids.has(a.target));
+    }
   }
 
   fitAll() {
@@ -257,6 +267,7 @@ export class Editor {
     this.mutate(() => {
       const set = new Set(this.selection);
       this.slide.objects = this.slide.objects.filter((o) => !set.has(o.id));
+      this.slide.animations = this.slide.animations.filter((a) => !set.has(a.target));
       this.selection = [];
       this.editingId = null;
     });
@@ -903,6 +914,76 @@ export class Editor {
       const paras = match.cell ? obj.cells[match.cell.r][match.cell.c].paragraphs : obj.paragraphs;
       replaceMatch(paras, match, replacement);
     });
+    return true;
+  }
+
+  // ---- 画面切り替え・アニメーション ----
+  /** 画面切り替え（all = すべてのスライドに適用） */
+  setTransition(patch, all = false) {
+    this.mutate(() => {
+      for (const s of all ? this.pres.slides : [this.slide]) {
+        const next = { type: 'fade', duration: 0.7, ...(s.transition || {}), ...patch };
+        s.transition = next.type === 'none' ? null : next;
+      }
+    });
+    return true;
+  }
+
+  /** 選択中のオブジェクトの開始効果を設定（既にあれば置き換え、なければ末尾に追加）。null で削除 */
+  setAnimation(effect) {
+    const ids = this.animTargets();
+    if (!ids.length) return false;
+    this.mutate(() => {
+      const list = this.slide.animations;
+      for (const id of ids) {
+        const i = list.findIndex((a) => a.target === id);
+        if (!effect) { if (i !== -1) list.splice(i, 1); continue; }
+        if (i !== -1) list[i] = { ...list[i], effect, direction: undefined };
+        else list.push({ target: id, effect, trigger: 'click', duration: effect === 'appear' ? 0.01 : 0.5 });
+      }
+    });
+    return true;
+  }
+
+  /** アニメーションの対象（グループは先頭のメンバーで代表する） */
+  animTargets() {
+    const out = [];
+    const groups = new Set();
+    for (const o of this.selectedObjects()) {
+      if (o.groupId) { if (groups.has(o.groupId)) continue; groups.add(o.groupId); }
+      out.push(o.id);
+    }
+    return out;
+  }
+
+  /** 選択中のオブジェクトのアニメーションの設定を変更（trigger / duration / direction） */
+  updateAnimation(patch) {
+    const ids = new Set(this.animTargets());
+    const list = this.slide.animations.filter((a) => ids.has(a.target));
+    if (!list.length) return false;
+    this.mutate(() => { for (const a of list) Object.assign(a, patch); });
+    return true;
+  }
+
+  /** アニメーションの順番を入れ替える（index の項目を dir だけ移動） */
+  moveAnimation(index, dir) {
+    const list = this.slide.animations;
+    const to = index + dir;
+    if (index < 0 || index >= list.length || to < 0 || to >= list.length) return false;
+    this.mutate(() => { [list[index], list[to]] = [list[to], list[index]]; });
+    return true;
+  }
+
+  removeAnimationAt(index) {
+    if (!this.slide.animations[index]) return false;
+    this.mutate(() => { this.slide.animations.splice(index, 1); });
+    return true;
+  }
+
+  setAnimationAt(index, patch) {
+    const a = this.slide.animations[index];
+    if (!a) return false;
+    this.mutate(() => { Object.assign(a, patch); });
     return true;
   }
 

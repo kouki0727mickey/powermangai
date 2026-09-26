@@ -829,3 +829,83 @@ test('置換後の文字に検索文字列が含まれていても、同じ箇�
   assert.equal(await ed(() => __pmg.text(__pmg.editor.slide.objects[0])), 'cats cats');
   await keys('Escape');
 });
+
+// ---------------------------------------------------------------- 画面切り替え・アニメーション
+test('画面切り替え（Alt → K → T）とすべてに適用、スライドショーで再生される', async () => {
+  await fresh();
+  await keys('Control+m');
+  await alt('k', 't');
+  await keys('ArrowDown', 'ArrowDown', 'Enter'); // プッシュ
+  await alt('k', 'o'); await keys('ArrowDown', 'Enter'); // 左から
+  await alt('k', 'l');
+  assert.deepEqual(await ed(() => __pmg.editor.pres.slides.map((s) => s.transition && [s.transition.type, s.transition.direction])), [['push', 'fromLeft'], ['push', 'fromLeft']]);
+  await keys('F5');
+  assert.ok(await ed(() => !!__pmg.app.show.trans), '最初のスライドでも画面切り替え');
+  await page.waitForFunction(() => __pmg.app.show && !__pmg.app.show.trans);
+  await keys('ArrowRight');
+  assert.equal(await ed(() => __pmg.app.show.index), 1);
+  assert.ok(await ed(() => !!__pmg.app.show.trans));
+  await keys('ArrowRight'); // 画面切り替え中の「次へ」は切り替えを完了させる
+  assert.equal(await ed(() => __pmg.app.show.trans), null);
+  await keys('Escape');
+});
+
+test('アニメーション（Alt → A → S）: クリックごとに表示され、再生中の「次へ」で完了', async () => {
+  await fresh();
+  await ed(() => { const e = __pmg.editor; e.slide.objects = []; e.emit(); });
+  await ed(() => __pmg.editor.insertObject('rect', { x: 400, y: 200, w: 160, h: 140, fill: '#FF0000', stroke: null }));
+  await alt('a', 's'); await keys('ArrowDown', 'ArrowDown', 'Enter'); // フェード
+  await ed(() => __pmg.editor.insertObject('ellipse', { x: 0, y: 0, w: 100, h: 100 }));
+  await alt('a', 's'); await keys('ArrowDown', 'ArrowDown', 'ArrowDown', 'Enter'); // スライドイン
+  await alt('a', 't'); await keys('ArrowDown', 'ArrowDown', 'Enter'); // 直前の動作の後
+  assert.deepEqual(await ed(() => __pmg.editor.slide.animations.map((a) => [a.effect, a.trigger])), [['fade', 'click'], ['flyIn', 'after']]);
+  const red = () => ed(() => { const c = document.getElementById('show-canvas'); const d = c.getContext('2d').getImageData(c.width / 2, c.height / 2, 1, 1).data; return d[0] > 200 && d[1] < 80; });
+  await keys('F5');
+  assert.equal(await red(), false, 'クリック前は非表示');
+  await keys('ArrowRight');
+  assert.ok(await ed(() => __pmg.app.show.playing));
+  await keys('ArrowRight'); // 再生中 → 完了
+  assert.deepEqual(await ed(() => [__pmg.app.show.done, __pmg.app.show.playing]), [1, null]);
+  assert.equal(await red(), true);
+  await keys('ArrowLeft');
+  assert.equal(await ed(() => __pmg.app.show.done), 0, '「前へ」でアニメーションを 1 つ戻す');
+  await keys('ArrowRight');
+  await page.waitForFunction(() => __pmg.app.show.done === 1 && !__pmg.app.show.playing);
+  await keys('ArrowRight');
+  assert.equal(await ed(() => __pmg.app.show.index), 1, 'アニメーションが終わったら次へ（最後です画面）');
+  await keys('Escape');
+});
+
+test('アニメーション ウィンドウ（Alt → A → M）で順番とタイミングを変更、Delete で削除', async () => {
+  await fresh();
+  await ed(() => {
+    const e = __pmg.editor;
+    const a = e.insertObject('rect'); e.setAnimation('fade');
+    const b = e.insertObject('ellipse'); e.setAnimation('zoom');
+    e.setSelection([a.id]);
+  });
+  await alt('a', 'm');
+  await page.waitForSelector('.dialog.side');
+  await keys('Control+ArrowDown'); // 1 番目を下へ
+  await keys('w'); // 直前の動作と同時
+  let list = await ed(() => __pmg.editor.slide.animations.map((a) => [a.effect, a.trigger]));
+  assert.deepEqual(list, [['zoom', 'click'], ['fade', 'with']]);
+  await keys('ArrowUp', 'Delete', 'Escape');
+  list = await ed(() => __pmg.editor.slide.animations.map((a) => a.effect));
+  assert.deepEqual(list, ['fade']);
+  assert.deepEqual(errors, []);
+});
+
+test('スライドショー中の Ctrl+S（すべてのスライド）と H（非表示スライドを表示）', async () => {
+  await fresh();
+  await keys('Control+m', 'Control+m');
+  await ed(() => { __pmg.editor.pres.slides[1].hidden = true; });
+  await keys('F5', 'h');
+  assert.equal(await ed(() => __pmg.app.show.index), 1, 'H で次の非表示スライドへ');
+  await keys('Control+s');
+  await page.waitForSelector('.list');
+  await keys('End', 'Enter');
+  assert.equal(await ed(() => __pmg.app.show.index), 2);
+  await keys('Escape');
+  assert.equal(await page.isVisible('#slideshow'), false);
+});
