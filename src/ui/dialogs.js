@@ -574,6 +574,7 @@ export function openFormatShape(o, { theme = DEFAULT_THEME, pickColor, isLine = 
       if (bad) { err.textContent = '数値を入力してください'; val(bad).focus(); val(bad).select(); return true; }
       if (n('fs-alpha') < 0 || n('fs-alpha') > 100) { err.textContent = '透明度は 0〜100 で入力してください'; val('fs-alpha').focus(); return true; }
       if (n('fs-w') < 0 || n('fs-h') < 0 || n('fs-sw') < 0) { err.textContent = 'サイズと線の幅は 0 以上で入力してください'; return true; }
+      if (hasText && ['fs-il', 'fs-it', 'fs-ir', 'fs-ib'].some((id) => n(id) < 0)) { err.textContent = '余白は 0 以上で入力してください'; return true; }
       const patch = {
         x: n('fs-x'), y: n('fs-y'), w: n('fs-w'), h: n('fs-h'), rotation: n('fs-rot'),
         opacity: 1 - n('fs-alpha') / 100,
@@ -590,7 +591,24 @@ export function openFormatShape(o, { theme = DEFAULT_THEME, pickColor, isLine = 
         patch.wrap = val('fs-wrap').checked;
         patch.inset = { l: n('fs-il'), t: n('fs-it'), r: n('fs-ir'), b: n('fs-ib') };
       }
-      d.close(patch);
+      // 変更した項目だけを返す（複数選択のとき、触っていない項目を先頭の図形の値で上書きしないため）
+      const orig = {
+        x: o.x, y: o.y, w: o.w, h: o.h, rotation: o.rotation, opacity: o.opacity ?? 1, stroke: o.stroke ?? null,
+        strokeWidth: o.strokeWidth, dash: o.dash || 'solid', shadow: !!o.shadow, name: o.name || '', fill: o.fill ?? null,
+        anchor: o.anchor, autoFit: o.autoFit, wrap: o.wrap !== false,
+      };
+      const round = (v) => (typeof v === 'number' ? Math.round(v * 100) / 100 : v);
+      const changed = {};
+      for (const [k, v] of Object.entries(patch)) {
+        if (k === 'inset') {
+          const ins = {};
+          for (const side of ['l', 't', 'r', 'b']) if (round(v[side]) !== round(o.inset[side])) ins[side] = v[side];
+          if (Object.keys(ins).length) changed.inset = ins;
+        } else if (round(v) !== round(orig[k])) {
+          changed[k] = v;
+        }
+      }
+      d.close(changed);
       return true;
     }
     return false; // Space（色ボタン・チェック）や select の矢印はブラウザに任せる

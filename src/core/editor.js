@@ -222,6 +222,14 @@ export class Editor {
     });
   }
 
+  /** 線の太さ。枠線のない図形には枠線を付ける（それ以外の色は変えない） */
+  setStrokeWidth(w) {
+    return this.updateSelected((o) => {
+      o.strokeWidth = w;
+      if (!o.stroke) o.stroke = '@accent1';
+    });
+  }
+
   /** 線の種類（矢印の有無）を変える: line / arrow / doubleArrow */
   setLineType(type) {
     return this.setObjectProp('type', type, isLine);
@@ -268,7 +276,11 @@ export class Editor {
     if (!o) return false;
     this.mutate(() => {
       o.hidden = !o.hidden;
-      if (o.hidden) this.selection = this.selection.filter((x) => x !== id);
+      // グループの一部だけが選択された状態にならないよう、グループごと選択を外す
+      if (o.hidden) {
+        const ids = new Set(this.expandGroups([id]));
+        this.selection = this.selection.filter((x) => !ids.has(x));
+      }
     });
     return true;
   }

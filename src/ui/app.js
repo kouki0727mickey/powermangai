@@ -529,7 +529,7 @@ const ACTIONS = {
     if (!r.action) { editor.setStroke(r.color); return; }
     if (r.action === 'weight') {
       const v = await openList('太さ', LINE_WEIGHTS.map((w) => ({ label: `${w} pt`, value: w })), { initial: Math.max(0, LINE_WEIGHTS.indexOf(o.strokeWidth)) });
-      if (v) editor.applyProps({ strokeWidth: v, stroke: o.stroke ?? '@accent1' });
+      if (v) editor.setStrokeWidth(v);
     } else if (r.action === 'dash') {
       const dashes = [['solid', '実線'], ['dash', '破線'], ['dot', '点線'], ['dashDot', '一点鎖線'], ['longDash', '長破線']];
       const v = await openList('実線 / 点線', dashes.map(([value, label]) => ({ label, value })), { initial: Math.max(0, dashes.findIndex(([d]) => d === o.dash)) });
@@ -566,9 +566,9 @@ const ACTIONS = {
       hasText: hasText(o),
       pickColor: (title, current, allowNone) => openPalette(title, { current, allowNone, theme: editor.theme }),
     });
-    if (!patch) return;
-    // 複数選択のときは名前と位置は変えない（すべて同じになってしまうため）
-    if (objs.length > 1) { delete patch.name; delete patch.x; delete patch.y; }
+    if (!patch || !Object.keys(patch).length) return;
+    // 複数選択のときは名前は変えない（すべて同じになってしまうため）
+    if (objs.length > 1) delete patch.name;
     editor.applyProps(patch);
   }),
   selectionPane: async () => {

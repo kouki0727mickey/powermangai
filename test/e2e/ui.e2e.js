@@ -555,3 +555,21 @@ test('選択ウィンドウ（Alt+F10）: Ctrl+Space で複数選択して Ctrl+
   assert.equal(await ed(() => new Set(__pmg.editor.selectedObjects().map((o) => o.groupId)).size), 1);
   assert.deepEqual(errors, []);
 });
+
+test('図形の書式設定を複数選択に使うと、変更した項目だけが全部に適用される', async () => {
+  await fresh();
+  await ed(() => {
+    const e = __pmg.editor;
+    e.insertObject('rect', { x: 0, fill: '#FF0000', w: 100 });
+    e.insertObject('ellipse', { x: 300, fill: '#0070C0', w: 200 });
+    e.selectAll();
+  });
+  await keys('Tab'); // 先頭の図形を選び直さない（全選択のまま）
+  await ed(() => __pmg.editor.selectAll());
+  await alt('j', 'd', 'o');
+  await page.waitForSelector('#fs-shadow');
+  await page.focus('#fs-shadow');
+  await keys('Space', 'Enter');
+  const objs = await ed(() => __pmg.editor.slide.objects.filter((o) => o.type !== 'text').map((o) => [o.fill, o.w, o.shadow]));
+  assert.deepEqual(objs, [['#FF0000', 100, true], ['#0070C0', 200, true]]);
+});

@@ -122,3 +122,23 @@ test('選択ウィンドウ: 追加選択、名前、非表示のオブジェク
   e.toggleHidden(c.id);
   assert.ok(!e.selection.includes(c.id), '非表示にすると選択から外れる');
 });
+
+test('線の太さは各図形の枠線の色を保つ', () => {
+  const e = ed();
+  const a = e.insertObject('rect', { stroke: '#FF0000' });
+  const b = e.insertObject('rect', { stroke: null });
+  e.selectAll();
+  e.setStrokeWidth(3);
+  assert.deepEqual([e.findObject(a.id).stroke, e.findObject(b.id).stroke], ['#FF0000', '@accent1']);
+  assert.ok(e.selectedObjects().every((o) => o.strokeWidth === 3));
+});
+
+test('グループの 1 つを非表示にするとグループ全体の選択が外れる', () => {
+  const e = ed();
+  const a = e.insertObject('rect');
+  const b = e.insertObject('rect');
+  e.selectAll(); e.group();
+  e.toggleHidden(a.id);
+  assert.deepEqual(e.selection, []);
+  assert.ok(e.findObject(b.id));
+});
