@@ -105,6 +105,15 @@ export function createObject(type, props = {}) {
   return obj;
 }
 
+/** オブジェクト内のすべての段落（表はすべてのセルの段落） */
+export function allParas(o) {
+  if (o.type === 'table') return o.cells.flatMap((row) => row.flatMap((c) => c.paragraphs));
+  return hasText(o) ? o.paragraphs : [];
+}
+
+/** 文字の書式を適用できるか（表も含む） */
+export function hasTextContent(o) { return hasText(o) || o.type === 'table'; }
+
 // ---- 文字へのアクセス（採点・検索などで使う）
 export function objText(o) { return o.paragraphs ? plainText(o.paragraphs) : ''; }
 export function objFont(o) { return o.paragraphs[0].runs[0].font; }

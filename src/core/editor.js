@@ -1,7 +1,8 @@
 // エディター状態と編集コマンド（Undo/Redo 付き）。DOM には依存しない。
 import {
-  clone, createObject, createSlide, createPresentation, newId, bounds, hasText, objText, isLine,
+  clone, createObject, createSlide, createPresentation, newId, bounds, hasText, objText, isLine, allParas, hasTextContent,
 } from './model.js';
+import { fitTable, createTable, insertRow, insertColumn, deleteRow, deleteColumn } from './table.js';
 import {
   fromPlainText, applyFontAll, allRunFonts, normalizeParagraph, MAX_LEVEL,
 } from './richtext.js';
@@ -84,7 +85,12 @@ export class Editor {
   }
 
   fitAll() {
-    for (const s of this.pres.slides) for (const o of s.objects) this.fitText(o);
+    for (const s of this.pres.slides) {
+      for (const o of s.objects) {
+        if (o.type === 'table') fitTable(o, this.measure, this.theme);
+        else this.fitText(o);
+      }
+    }
   }
 
   undo() {
@@ -176,6 +182,74 @@ export class Editor {
     });
   }
 
+  /** 表の挿入（rows 行 × cols 列）。幅はスライド幅に合わせる */
+  insertTable(rows, cols) {
+    return this.mutate(() => {
+      const t = createTable(rows, cols, { w: this.pres.width - 120 });
+      fitTable(t, this.measure, this.theme);
+      t.x = Math.round((this.pres.width - t.w) / 2);
+      t.y = Math.round((this.pres.height - t.h) / 2);
+      this.slide.objects.push(t);
+      this.selection = [t.id];
+      this.editingId = null;
+      return t;
+    });
+  }
+
+  /** 図の挿入。natural: 画像の元のサイズ（スライドの 8 割に収まるよう縮小） */
+  insertImage(src, natural) {
+    const maxW = this.pres.width * 0.8, maxH = this.pres.height * 0.8;
+    const k = Math.min(1, maxW / natural.w, maxH / natural.h);
+    return this.insertObject('image', {
+      src, w: Math.round(natural.w * k), h: Math.round(natural.h * k), fill: null, stroke: null, lockAspect: true, name: '',
+    });
+  }
+
+  /** 選択中の表と、操作の基準にするセル（cell 省略時は末尾の行・列） */
+  selectedTable() {
+    const objs = this.selectedObjects();
+    return objs.length === 1 && objs[0].type === 'table' ? objs[0] : null;
+  }
+
+  /** 表の構造の変更。op: rowAbove / rowBelow / colLeft / colRight / deleteRow / deleteCol */
+  tableOp(op, cell) {
+    const t = this.selectedTable();
+    if (!t) return false;
+    const r = cell ? cell.r : op === 'rowAbove' ? 0 : t.cells.length - 1;
+    const c = cell ? cell.c : op === 'colLeft' ? 0 : t.colWidths.length - 1;
+    let ok = true;
+    this.mutate(() => {
+      switch (op) {
+        case 'rowAbove': insertRow(t, r); break;
+        case 'rowBelow': insertRow(t, r + 1); break;
+        case 'colLeft': insertColumn(t, c); break;
+        case 'colRight': insertColumn(t, c + 1); break;
+        case 'deleteRow': ok = deleteRow(t, r); break;
+        case 'deleteCol': ok = deleteColumn(t, c); break;
+        default: ok = false;
+      }
+    });
+    return ok;
+  }
+
+  setTableProp(prop, value) {
+    const t = this.selectedTable();
+    if (!t) return false;
+    this.mutate(() => { t[prop] = value; });
+    return true;
+  }
+
+  /** セルの塗りつぶし（cell 省略時はすべてのセル） */
+  setCellFill(color, cell) {
+    const t = this.selectedTable();
+    if (!t) return false;
+    this.mutate(() => {
+      if (cell) t.cells[cell.r][cell.c].fill = color;
+      else for (const row of t.cells) for (const c of row) c.fill = color;
+    });
+    return true;
+  }
+
   // ---- 削除 ----
   deleteSelection() {
     if (this.selection.length === 0) return false;
@@ -201,8 +275,22 @@ export class Editor {
 
   resize(dw, dh) {
     return this.updateSelected((o) => {
-      o.w = Math.max(o.type === 'line' ? 0 : 1, o.w + dw);
-      o.h = Math.max(o.type === 'line' ? 0 : 1, o.h + dh);
+      if (o.type === 'table') {
+        // 表は列幅・行の高さを比例して変える（行の高さは文字量より小さくならない）
+        const w = Math.max(10, o.w + dw);
+        o.colWidths = o.colWidths.map((cw) => (cw * w) / o.w);
+        const h = Math.max(10, o.h + dh);
+        o.rowHeights = o.rowHeights.map((rh) => Math.max(8, (rh * h) / o.h));
+        return;
+      }
+      if (o.type === 'image' && o.lockAspect !== false && o.h > 0) {
+        // 図は縦横比を保つ
+        const ratio = o.w / o.h;
+        if (dw) { o.w = Math.max(1, o.w + dw); o.h = o.w / ratio; } else { o.h = Math.max(1, o.h + dh); o.w = o.h * ratio; }
+        return;
+      }
+      o.w = Math.max(isLine(o) ? 0 : 1, o.w + dw);
+      o.h = Math.max(isLine(o) ? 0 : 1, o.h + dh);
     });
   }
 
@@ -292,13 +380,13 @@ export class Editor {
   }
 
   // ---- 書式（図形を選択した状態では、図形内のすべての文字に適用） ----
-  textObjects() { return this.selectedObjects().filter(hasText); }
+  textObjects() { return this.selectedObjects().filter(hasTextContent); }
 
   toggleFont(prop) {
     const objs = this.textObjects();
     if (objs.length === 0) return false;
-    const value = !objs.every((o) => allRunFonts(o.paragraphs).every((f) => f[prop]));
-    this.mutate(() => { for (const o of objs) applyFontAll(o.paragraphs, (f) => { f[prop] = value; }); });
+    const value = !objs.every((o) => allRunFonts(allParas(o)).every((f) => f[prop]));
+    this.mutate(() => { for (const o of objs) applyFontAll(allParas(o), (f) => { f[prop] = value; }); });
     return true;
   }
 
@@ -306,15 +394,15 @@ export class Editor {
   toggleBaseline(kind) {
     const objs = this.textObjects();
     if (objs.length === 0) return false;
-    const value = objs.every((o) => allRunFonts(o.paragraphs).every((f) => f.baseline === kind)) ? 0 : kind;
-    this.mutate(() => { for (const o of objs) applyFontAll(o.paragraphs, (f) => { f.baseline = value; }); });
+    const value = objs.every((o) => allRunFonts(allParas(o)).every((f) => f.baseline === kind)) ? 0 : kind;
+    this.mutate(() => { for (const o of objs) applyFontAll(allParas(o), (f) => { f.baseline = value; }); });
     return true;
   }
 
   setFont(prop, value) {
     const objs = this.textObjects();
     if (objs.length === 0) return false;
-    this.mutate(() => { for (const o of objs) applyFontAll(o.paragraphs, (f) => { f[prop] = value; }); });
+    this.mutate(() => { for (const o of objs) applyFontAll(allParas(o), (f) => { f[prop] = value; }); });
     return true;
   }
 
@@ -322,14 +410,14 @@ export class Editor {
   setFontProps(props) {
     const objs = this.textObjects();
     if (objs.length === 0) return false;
-    this.mutate(() => { for (const o of objs) applyFontAll(o.paragraphs, (f) => Object.assign(f, props)); });
+    this.mutate(() => { for (const o of objs) applyFontAll(allParas(o), (f) => Object.assign(f, props)); });
     return true;
   }
 
   changeFontSize(dir) {
     const objs = this.textObjects();
     if (objs.length === 0) return false;
-    this.mutate(() => { for (const o of objs) applyFontAll(o.paragraphs, (f) => { f.size = stepFontSize(f.size, dir); }); });
+    this.mutate(() => { for (const o of objs) applyFontAll(allParas(o), (f) => { f.size = stepFontSize(f.size, dir); }); });
     return true;
   }
 
@@ -338,14 +426,14 @@ export class Editor {
     if (objs.length === 0) return false;
     this.mutate(() => {
       for (const o of objs) {
-        applyFontAll(o.paragraphs, (f) => { f.bold = false; f.italic = false; f.underline = false; f.strike = false; f.baseline = 0; });
+        applyFontAll(allParas(o), (f) => { f.bold = false; f.italic = false; f.underline = false; f.strike = false; f.baseline = 0; });
       }
     });
     return true;
   }
 
   changeCase() {
-    const objs = this.textObjects().filter((o) => objText(o));
+    const objs = this.selectedObjects().filter((o) => hasText(o) && objText(o));
     if (objs.length === 0) return false;
     this.mutate(() => {
       for (const o of objs) {
@@ -368,7 +456,7 @@ export class Editor {
   setParagraphProp(prop, value) {
     const objs = this.textObjects();
     if (objs.length === 0) return false;
-    this.mutate(() => { for (const o of objs) for (const p of o.paragraphs) p[prop] = value; });
+    this.mutate(() => { for (const o of objs) for (const p of allParas(o)) p[prop] = value; });
     return true;
   }
 
@@ -378,7 +466,7 @@ export class Editor {
   toggleBullet(kind) {
     const objs = this.textObjects();
     if (objs.length === 0) return false;
-    const all = objs.every((o) => o.paragraphs.every((p) => p.bullet === kind));
+    const all = objs.every((o) => allParas(o).every((p) => p.bullet === kind));
     return this.setParagraphProp('bullet', all ? 'none' : kind);
   }
 
@@ -387,7 +475,7 @@ export class Editor {
     const objs = this.textObjects();
     if (objs.length === 0) return false;
     this.mutate(() => {
-      for (const o of objs) for (const p of o.paragraphs) p.level = Math.max(0, Math.min(MAX_LEVEL, p.level + dir));
+      for (const o of objs) for (const p of allParas(o)) p.level = Math.max(0, Math.min(MAX_LEVEL, p.level + dir));
     });
     return true;
   }
@@ -617,12 +705,25 @@ export class Editor {
   // ---- テキスト編集 ----
   canEdit() {
     const objs = this.selectedObjects();
-    return objs.length === 1 && hasText(objs[0]);
+    return objs.length === 1 && (hasText(objs[0]) || objs[0].type === 'table');
   }
 
-  startEdit() {
+  /** 編集中の段落の置き場所（表ならセル） */
+  editTarget() {
+    const obj = this.editingId && this.findObject(this.editingId);
+    if (!obj) return null;
+    if (obj.type === 'table') {
+      const { r, c } = this.editingCell;
+      return obj.cells[r][c];
+    }
+    return obj;
+  }
+
+  /** 編集を開始。表なら cell（{ r, c }、省略時は左上）のセル */
+  startEdit(cell) {
     if (!this.canEdit()) return false;
     this.editingId = this.selection[0];
+    this.editingCell = this.findObject(this.editingId).type === 'table' ? (cell || { r: 0, c: 0 }) : null;
     this.editBefore = this.snapshot();
     this.editPresBefore = JSON.stringify(this.pres);
     this.emit();
@@ -631,26 +732,37 @@ export class Editor {
 
   /** 編集中の文字をその場で反映（履歴には積まない。自動調整の高さやサムネイルを更新するため） */
   previewEdit(paragraphs) {
-    const obj = this.editingId && this.findObject(this.editingId);
-    if (!obj) return;
-    obj.paragraphs = paragraphs.map((p) => normalizeParagraph({ ...p, runs: p.runs.map((r) => ({ text: r.text, font: { ...r.font } })) }));
-    this.fitText(obj);
+    const target = this.editTarget();
+    if (!target) return;
+    target.paragraphs = paragraphs.map((p) => normalizeParagraph({ ...p, runs: p.runs.map((r) => ({ text: r.text, font: { ...r.font } })) }));
+    this.fitAll();
     this.emit();
+  }
+
+  /** 表のセル間を移動（編集を続けたまま。履歴は編集の終了時にまとめて積む） */
+  moveCell(r, c, paragraphs) {
+    const obj = this.findObject(this.editingId);
+    if (!obj || obj.type !== 'table') return false;
+    if (paragraphs) this.previewEdit(paragraphs);
+    this.editingCell = { r, c };
+    this.emit();
+    return true;
   }
 
   /** 編集を終了。text は段落の配列かプレーンテキスト。編集全体を 1 回の操作として履歴に積む */
   endEdit(text) {
     const id = this.editingId;
     if (!id) return;
-    const obj = this.findObject(id);
+    const obj = this.editTarget();
     if (obj && Array.isArray(text)) {
       obj.paragraphs = text.map((p) => normalizeParagraph({ ...p, runs: p.runs.map((r) => ({ text: r.text, font: { ...r.font } })) }));
     } else if (obj && typeof text === 'string' && text !== objText(obj)) {
       const { runs, ...props } = obj.paragraphs[0];
       obj.paragraphs = fromPlainText(text, runs[0].font, props);
     }
-    if (obj) this.fitText(obj);
+    this.fitAll();
     this.editingId = null;
+    this.editingCell = null;
     if (JSON.stringify(this.pres) !== this.editPresBefore) {
       this.undoStack.push(this.editBefore);
       if (this.undoStack.length > HISTORY_LIMIT) this.undoStack.shift();

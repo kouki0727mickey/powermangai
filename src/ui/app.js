@@ -14,9 +14,10 @@ import { drawSlide, drawSelection, drawObject, slideToDataUrl, measureText, setI
 import { RichEditor } from './richeditor.js';
 import {
   activeDialog, openPalette, openShapeGallery, openGallery, openInput, openList, openConfirm,
-  openContent, openHelp, openFontDialog, openSelectionPane, openFormatShape, h,
+  openContent, openHelp, openFontDialog, openSelectionPane, openFormatShape, openTablePicker, h,
 } from './dialogs.js';
-import { openPresentationFile, savePresentationFile, openImageFile, setFullScreen } from './platform.js';
+import { openPresentationFile, savePresentationFile, openImageFile, setFullScreen, readSystemClipboard, imageSize } from './platform.js';
+import { tableLayout, CELL_INSET } from '../core/table.js';
 
 const FONT_FAMILIES = ['+major', '+minor', 'Yu Gothic UI', '游ゴシック', 'メイリオ', 'MS ゴシック', 'MS 明朝', 'BIZ UDPゴシック', 'Arial', 'Segoe UI', 'Times New Roman', 'Consolas'];
 const LINE_SPACINGS = [1, 1.5, 2, 2.5, 3];
@@ -118,9 +119,12 @@ function render() {
   if (size !== lastSize) { lastSize = size; layout(); return; }
   const slide = editor.slide;
   drawSlide(mainCanvas.getContext('2d'), slide, mainCanvas.width, mainCanvas.height, {
-    pres: editor.pres, index: editor.slideIndex, showPlaceholder: true, hideTextOf: editor.editingId,
+    pres: editor.pres, index: editor.slideIndex, showPlaceholder: true, hideTextOf: editor.editingId, hideCell: editor.editingCell,
   });
-  drawSelection(overlay.getContext('2d'), slide, editor.selection, overlay.width, overlay.height, { editingId: editor.editingId, size: editor.size });
+  const view = editor.editingCell ? editView() : null;
+  drawSelection(overlay.getContext('2d'), slide, editor.selection, overlay.width, overlay.height, {
+    editingId: editor.editingId, size: editor.size, cellRect: view,
+  });
   renderThumbs();
   renderTextEditor();
   renderStatus();
@@ -159,9 +163,22 @@ function renderThumbs() {
   $('stage').classList.toggle('pane-focus', editor.pane === 'editor' || !!editor.editingId);
 }
 
-function renderTextEditor() {
+/** 編集中の文字の領域（表ならセルを図形に見立てたもの） */
+function editView() {
   const obj = editor.editingId ? editor.findObject(editor.editingId) : null;
-  if (obj && rich.active) rich.position(obj, app.scale);
+  if (!obj) return null;
+  if (obj.type !== 'table') return obj;
+  const { r, c } = editor.editingCell;
+  const lay = tableLayout(obj, measureText, editor.theme);
+  return {
+    type: 'rect', x: obj.x + lay.xs[c], y: obj.y + lay.ys[r], w: obj.colWidths[c], h: lay.heights[r],
+    rotation: 0, inset: CELL_INSET, anchor: 'top', wrap: true, paragraphs: obj.cells[r][c].paragraphs,
+  };
+}
+
+function renderTextEditor() {
+  const view = editView();
+  if (view && rich.active) rich.position(view, app.scale);
   focusSink();
 }
 
@@ -175,14 +192,14 @@ function focusSink() {
 rich.el.addEventListener('compositionstart', () => {
   if (editor.editingId || editor.pane !== 'editor' || !editor.canEdit() || app.keytips) return;
   editor.startEdit();
-  rich.beginFromTyping(editor.findObject(editor.editingId), editor.theme, app.scale);
+  rich.beginFromTyping(editView(), editor.theme, app.scale);
 });
 // キー操作を伴わない文字の入力（音声入力・一部の入力方式）でも同様に編集を始める
 rich.el.addEventListener('beforeinput', (e) => {
   if (rich.active || rich.composing || !e.inputType.startsWith('insert')) return;
   if (editor.editingId || editor.pane !== 'editor' || !editor.canEdit() || app.keytips) return;
   editor.startEdit();
-  rich.beginFromTyping(editor.findObject(editor.editingId), editor.theme, app.scale);
+  rich.beginFromTyping(editView(), editor.theme, app.scale);
 });
 rich.el.addEventListener('input', () => {
   if (rich.active || rich.composing) return;
@@ -274,9 +291,9 @@ function renderKeytips() {
 }
 
 // ------------------------------------------------------------------ テキスト編集
-function beginEdit({ clear = false, select = 'end' } = {}) {
-  if (!editor.startEdit()) return false;
-  rich.begin(editor.findObject(editor.editingId), editor.theme, app.scale, { clear, select });
+function beginEdit({ clear = false, select = 'end', cell } = {}) {
+  if (!editor.startEdit(cell)) return false;
+  rich.begin(editView(), editor.theme, app.scale, { clear, select });
   render();
   return true;
 }
@@ -285,6 +302,31 @@ function commitEdit() {
   if (!editor.editingId) return;
   const paras = rich.active ? rich.end() : null;
   editor.endEdit(paras ?? undefined);
+}
+
+/** 表のセルの移動（Tab / Shift+Tab / ↑ / ↓）。最後のセルで Tab を押すと行を追加 */
+function moveCell(dr, dc) {
+  const t = editor.findObject(editor.editingId);
+  let { r, c } = editor.editingCell;
+  const rows = t.cells.length, cols = t.colWidths.length;
+  if (dc) {
+    c += dc;
+    if (c >= cols) { c = 0; r += 1; }
+    if (c < 0) { c = cols - 1; r -= 1; }
+  } else {
+    r += dr;
+  }
+  if (r < 0) return false;
+  const paras = rich.end();
+  if (r >= rows) {
+    if (!dc) { editor.moveCell(editor.editingCell.r, editor.editingCell.c, paras); rich.begin(editView(), editor.theme, app.scale); return false; }
+    editor.previewEdit(paras);
+    editor.tableOp('rowBelow', { r: rows - 1, c: 0 });
+  }
+  editor.moveCell(r, c, r >= rows ? null : paras);
+  rich.begin(editView(), editor.theme, app.scale, { select: dc ? 'all' : 'end' });
+  render();
+  return true;
 }
 
 /** 書式の操作: 文字の編集中は選択した文字に、図形を選択中は図形内のすべての文字に適用 */
@@ -315,7 +357,7 @@ const TEXT_KEEP = new Set([
   'alignLeft', 'alignCenter', 'alignRight', 'alignJustify', 'changeCase', 'fontDialog', 'help', 'toggleTarget', 'toggleHints',
   'input:fontSize', 'input:fontFamily', 'palette:fontColor', 'bullets', 'numbering', 'demote', 'promote',
   'lineSpacing1', 'lineSpacing15', 'lineSpacing2', 'gallery:lineSpacing', 'moveParaUp', 'moveParaDown',
-  'textUndo', 'textRedo', 'copyFormat', 'pasteFormat', 'textAnchor', 'save', 'saveAs',
+  'textUndo', 'textRedo', 'copyFormat', 'pasteFormat', 'textAnchor', 'save', 'saveAs', 'palette:cellFill',
 ]);
 
 // ------------------------------------------------------------------ アクション
@@ -369,7 +411,15 @@ const ACTIONS = {
   },
   copy: () => (editor.copy() ? setStatus('コピーしました') : needSelection()),
   cut: () => (editor.cut() || needSelection()),
-  paste: () => editor.paste() || (setStatus('クリップボードが空です'), false),
+  paste: async () => {
+    if (editor.paste()) return true;
+    // アプリ内でコピーしたものがなければ、他のアプリでコピーした画像・文字を貼り付ける
+    const sys = await readSystemClipboard();
+    if (sys.image) return insertPictureFromDataUrl(sys.image);
+    if (sys.text) return pasteTextAsBox(sys.text);
+    setStatus('クリップボードが空です');
+    return false;
+  },
   duplicate: () => editor.duplicate(),
   selectAll: () => editor.selectAll(),
   selectNext: () => editor.selectNext(1),
@@ -571,6 +621,71 @@ const ACTIONS = {
     if (objs.length > 1) delete patch.name;
     editor.applyProps(patch);
   }),
+  insertTable: async () => {
+    let r = await openTablePicker();
+    if (r === 'dialog') {
+      const cols = await openInput('表の挿入: 列数', { value: 5, validate: (x) => (/^\d+$/.test(x) && x >= 1 && x <= 75 ? null : '1〜75 の整数を入力してください') });
+      if (cols === null) return;
+      const rows = await openInput('表の挿入: 行数', { value: 2, validate: (x) => (/^\d+$/.test(x) && x >= 1 && x <= 75 ? null : '1〜75 の整数を入力してください') });
+      if (rows === null) return;
+      r = { rows: Number(rows), cols: Number(cols) };
+    }
+    if (!r) return;
+    editor.pane = 'editor';
+    editor.insertTable(r.rows, r.cols);
+    beginEdit({ cell: { r: 0, c: 0 } });
+    setStatus('表を挿入しました（Tab: 次のセル ／ Esc: 表を選択）');
+  },
+  insertPicture: async () => {
+    let r;
+    try { r = await openImageFile(); } catch (err) { await openContent('エラー', h('p', { text: `画像を読み込めませんでした: ${err.message}` })); return; }
+    if (!r) return;
+    await insertPictureFromDataUrl(r.dataUrl);
+  },
+  tableOp: (op) => {
+    if (!editor.selectedTable()) { setStatus('表を選択してください'); return false; }
+    const cell = app.actionCell && app.actionCell.id === editor.selection[0] ? app.actionCell : null;
+    const ok = editor.tableOp(op, cell);
+    if (!ok) setStatus('これ以上削除できません（表全体は Alt → J → L → D → T）');
+    if (cell) {
+      // PowerPoint と同じく、同じセル（挿入・削除でずれた位置）で編集を続ける
+      const t = editor.selectedTable();
+      let { r, c } = cell;
+      if (ok && op === 'rowAbove') r += 1;
+      if (ok && op === 'colLeft') c += 1;
+      r = Math.min(r, t.cells.length - 1);
+      c = Math.min(c, t.colWidths.length - 1);
+      beginEdit({ cell: { r, c } });
+    }
+    return ok;
+  },
+  toggleTableProp: (prop) => {
+    const t = editor.selectedTable();
+    if (!t) { setStatus('表を選択してください'); return false; }
+    return editor.setTableProp(prop, !t[prop]);
+  },
+  'palette:cellFill': async () => {
+    const t = editor.selectedTable();
+    if (!t) { setStatus('表を選択してください'); return false; }
+    const cell = editor.editingCell ? { ...editor.editingCell } : null;
+    const cur = cell ? t.cells[cell.r][cell.c].fill : null;
+    const r = await keepTextSelection(() => openPalette(cell ? 'セルの塗りつぶし' : '塗りつぶし（すべてのセル）', { current: cur, theme: editor.theme }));
+    if (r) editor.setCellFill(r.color, cell);
+    return true;
+  },
+  pasteSpecial: async () => {
+    const sys = await readSystemClipboard();
+    const items = [];
+    if (editor.clipboard) items.push({ label: 'アプリ内でコピーしたもの（元の書式を保持）', value: 'internal' });
+    if (sys.image) items.push({ label: '図（クリップボードの画像）', value: 'image' });
+    if (sys.text) items.push({ label: 'テキストのみ保持', value: 'text' });
+    if (!items.length) { setStatus('貼り付けるものがありません'); return false; }
+    const v = await openList('形式を選択して貼り付け', items);
+    if (v === 'internal') editor.paste();
+    else if (v === 'image') await insertPictureFromDataUrl(sys.image);
+    else if (v === 'text') pasteTextAsBox(sys.text);
+    return true;
+  },
   selectionPane: async () => {
     commitEdit();
     editor.pane = 'editor';
@@ -629,6 +744,26 @@ const REPEATABLE = new Set([
   'flip', 'strike', 'subscript', 'superscript', 'bullets', 'numbering', 'demote', 'promote',
 ]);
 
+async function insertPictureFromDataUrl(dataUrl) {
+  try {
+    const size = await imageSize(dataUrl);
+    editor.pane = 'editor';
+    editor.insertImage(dataUrl, size);
+    setStatus('図を挿入しました（Shift+矢印で縦横比を保ったままサイズ変更）');
+    return true;
+  } catch (err) {
+    await openContent('エラー', h('p', { text: err.message }));
+    return false;
+  }
+}
+
+function pasteTextAsBox(text) {
+  editor.pane = 'editor';
+  const t = editor.insertObject('text', { text: text.replace(/\r\n?/g, '\n'), w: Math.min(editor.pres.width - 80, 600) });
+  editor.setSelection([t.id]);
+  return true;
+}
+
 async function inputFontSize() {
   const v = await openInput('フォント サイズ', {
     value: currentFont()?.size ?? 18,
@@ -682,6 +817,8 @@ async function save(saveAs) {
 async function runAction(action, args, { keys = '', label = '', repeat = false } = {}) {
   const fn = ACTIONS[action];
   if (!fn) { setStatus(`未対応の操作です: ${action}`); return false; }
+  // 表のセルを編集中だった場合、そのセルを行・列の操作の基準にする
+  app.actionCell = editor.editingCell ? { id: editor.editingId, ...editor.editingCell } : null;
   if (editor.editingId && !TEXT_KEEP.has(action)) commitEdit();
   if (keys) {
     const p = app.practice;
@@ -1027,6 +1164,16 @@ function onKeyDown(e) {
   if (ctx === 'text') {
     if (!rich.active || e.ctrlKey || e.metaKey || e.altKey) return; // その他はブラウザの編集操作（単語単位の移動など）に任せる
     // 段落の分割・結合やレベル変更はモデルで処理する（PowerPoint と同じ動作）
+    if (editor.editingCell) {
+      // 表: Tab / Shift+Tab でセルを移動。↑ / ↓ は先頭 / 末尾の段落にいるとき上下のセルへ
+      if (e.key === 'Tab') { e.preventDefault(); moveCell(0, e.shiftKey ? -1 : 1); return; }
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey) {
+        rich.sync();
+        const { from } = rich.getSel();
+        if (e.key === 'ArrowUp' && from.p === 0) { e.preventDefault(); moveCell(-1, 0); return; }
+        if (e.key === 'ArrowDown' && from.p === rich.paras.length - 1) { e.preventDefault(); moveCell(1, 0); return; }
+      }
+    }
     if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) rich.softBreak(); else rich.enter(); return; }
     if (e.key === 'Tab') { e.preventDefault(); rich.tab(e.shiftKey); return; }
     if (e.key === 'Backspace' && !e.shiftKey && rich.backspaceAtStart()) { e.preventDefault(); return; }

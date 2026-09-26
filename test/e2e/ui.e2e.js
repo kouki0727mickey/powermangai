@@ -573,3 +573,76 @@ test('図形の書式設定を複数選択に使うと、変更した項目だ�
   const objs = await ed(() => __pmg.editor.slide.objects.filter((o) => o.type !== 'text').map((o) => [o.fill, o.w, o.shadow]));
   assert.deepEqual(objs, [['#FF0000', 100, true], ['#0070C0', 200, true]]);
 });
+
+// ---------------------------------------------------------------- 表と図
+const tableTexts = () => ed(() => __pmg.editor.slide.objects.find((o) => o.type === 'table').cells.map((row) => row.map((c) => __pmg.text({ type: 'text', paragraphs: c.paragraphs }))));
+
+test('表の挿入（Alt → N → T、矢印で 3×2）→ Tab でセル移動、最後のセルの Tab で行追加、Esc で表を選択', async () => {
+  await fresh();
+  await alt('n', 't');
+  await page.waitForSelector('.table-picker');
+  await keys('ArrowRight', 'Enter'); // 既定の 3×2 → 4×2... 3 列目まで戻す
+  await keys('Escape', 'Delete');
+  await alt('n', 't');
+  await keys('Enter'); // 3 列 × 2 行
+  await page.keyboard.type('A');
+  await keys('Tab'); await page.keyboard.type('B');
+  await keys('Tab'); await page.keyboard.type('C');
+  await keys('Tab'); await page.keyboard.type('1');
+  await keys('Tab', 'Tab', 'Tab'); // 最後のセルで Tab → 行が増える
+  await page.keyboard.type('x');
+  await keys('ArrowUp'); await page.keyboard.type('y'); // 1 つ上のセル（2 行目 1 列目）の末尾
+  await keys('Escape');
+  assert.deepEqual(await tableTexts(), [['A', 'B', 'C'], ['1y', '', ''], ['x', '', '']]);
+  assert.equal(await ed(() => __pmg.editor.selectedObjects()[0].type), 'table');
+  await keys('Control+z');
+  assert.deepEqual(await tableTexts(), [['', '', ''], ['', '', '']], '編集全体（行の追加も含む）を 1 回で戻す');
+  assert.deepEqual(errors, []);
+});
+
+test('表のレイアウト（Alt → J → L）: セル編集中は、そのセルを基準に行・列を挿入・削除', async () => {
+  await fresh();
+  await alt('n', 't'); await keys('Enter');
+  await keys('Tab'); await page.keyboard.type('B'); // 1 行目 2 列目
+  await alt('j', 'l', 'l'); // 左に列を挿入
+  assert.deepEqual(await tableTexts(), [['', '', 'B', ''], ['', '', '', '']]);
+  assert.deepEqual(await ed(() => __pmg.editor.editingCell), { r: 0, c: 2 }, '同じセルで編集を続ける');
+  await keys('Shift+Tab');
+  await alt('j', 'l', 'd', 'c'); // 列の削除（挿入した空の列）
+  assert.deepEqual(await tableTexts(), [['', 'B', ''], ['', '', '']]);
+  await keys('Escape');
+  await alt('j', 't', 'h'); // タイトル行をオフ
+  assert.equal(await ed(() => __pmg.editor.selectedObjects()[0].headerRow), false);
+  await alt('j', 'l', 'd', 't'); // 表の削除
+  assert.equal(await ed(() => __pmg.editor.slide.objects.some((o) => o.type === 'table')), false);
+});
+
+test('図の挿入（Alt → N → P）と縦横比を保ったサイズ変更', async () => {
+  await fresh();
+  const dataUrl = await ed(() => { const c = document.createElement('canvas'); c.width = 400; c.height = 200; const x = c.getContext('2d'); x.fillStyle = '#0a0'; x.fillRect(0, 0, 400, 200); return c.toDataURL('image/png'); });
+  const chooser = page.waitForEvent('filechooser');
+  await alt('n', 'p');
+  await (await chooser).setFiles({ name: 'g.png', mimeType: 'image/png', buffer: Buffer.from(dataUrl.split(',')[1], 'base64') });
+  await page.waitForFunction(() => __pmg.editor.selectedObjects()[0]?.type === 'image');
+  let o = await selObj();
+  assert.deepEqual([o.w, o.h], [400, 200]);
+  await keys('Shift+ArrowRight');
+  o = await selObj();
+  assert.deepEqual([o.w, o.h], [408, 204]);
+  // 画面に描画されている（緑の画素がある）
+  const green = await ed(() => { const c = document.getElementById('slide-canvas'); const d = c.getContext('2d').getImageData(c.width / 2, c.height / 2, 1, 1).data; return d[1] > 100 && d[0] < 50; });
+  assert.ok(green);
+});
+
+test('アプリ内でコピーしていないときの Ctrl+V は他のアプリの文字をテキスト ボックスとして貼り付け', async () => {
+  await fresh();
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await ed(() => navigator.clipboard.writeText('外部の文字'));
+  await keys('Control+v');
+  await page.waitForFunction(() => __pmg.editor.selectedObjects()[0]?.type === 'text');
+  assert.equal(await ed(() => __pmg.text(__pmg.editor.selectedObjects()[0])), '外部の文字');
+  await keys('Control+c', 'Control+Alt+v');
+  await page.waitForSelector('.list');
+  assert.equal(await page.$$eval('.list li', (els) => els.length), 2);
+  await keys('Escape');
+});

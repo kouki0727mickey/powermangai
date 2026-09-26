@@ -101,6 +101,33 @@ export const KEYTIPS = {
         { key: 'I', label: '新しいスライド', action: 'gallery:layout' },
         { key: 'X', label: 'テキスト ボックス', action: 'insertTextBox' },
         { key: 'SH', label: '図形', action: 'gallery:shapes' },
+        { key: 'T', label: '表', action: 'insertTable' },
+        { key: 'P', label: '画像（このデバイス）', action: 'insertPicture' },
+      ],
+    },
+    {
+      key: 'JL', label: '表のレイアウト',
+      children: [
+        { key: 'A', label: '上に行を挿入', action: 'tableOp', args: 'rowAbove' },
+        { key: 'BE', label: '下に行を挿入', action: 'tableOp', args: 'rowBelow' },
+        { key: 'L', label: '左に列を挿入', action: 'tableOp', args: 'colLeft' },
+        { key: 'R', label: '右に列を挿入', action: 'tableOp', args: 'colRight' },
+        {
+          key: 'D', label: '削除',
+          children: [
+            { key: 'C', label: '列の削除', action: 'tableOp', args: 'deleteCol' },
+            { key: 'R', label: '行の削除', action: 'tableOp', args: 'deleteRow' },
+            { key: 'T', label: '表の削除', action: 'delete' },
+          ],
+        },
+      ],
+    },
+    {
+      key: 'JT', label: 'テーブル デザイン',
+      children: [
+        { key: 'H', label: 'タイトル行（見出し）', action: 'toggleTableProp', args: 'headerRow' },
+        { key: 'B', label: '縞模様（行）', action: 'toggleTableProp', args: 'bandedRows' },
+        { key: 'S', label: '塗りつぶし（セル）', action: 'palette:cellFill' },
       ],
     },
     {

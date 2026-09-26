@@ -1,5 +1,5 @@
 // Electron メイン プロセス
-import { app, BrowserWindow, Menu, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, Menu, dialog, ipcMain, clipboard } from 'electron';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -73,6 +73,15 @@ ipcMain.handle('image:open', async (e) => {
   const buf = await readFile(filePath);
   if (buf.length > MAX_IMAGE_BYTES) throw new Error('画像が大きすぎます（20MB まで）');
   return { name: path.basename(filePath), dataUrl: `data:${mime};base64,${buf.toString('base64')}` };
+});
+
+// システムのクリップボード（他のアプリでコピーした文字・画像の貼り付け用）
+ipcMain.handle('clipboard:read', () => {
+  const img = clipboard.readImage();
+  return {
+    text: clipboard.readText(),
+    image: img.isEmpty() ? null : img.toDataURL(),
+  };
 });
 
 ipcMain.handle('window:fullscreen', (e, flag) => {

@@ -615,3 +615,40 @@ export function openFormatShape(o, { theme = DEFAULT_THEME, pickColor, isLine = 
   };
   return d.show();
 }
+
+// ---------------------------------------------------------------- 表の挿入
+/** PowerPoint と同じく、升目を矢印キーで広げて Enter。I で行数・列数を入力 */
+export function openTablePicker() {
+  const COLS = 10, ROWS = 8;
+  const d = new Dialog('表の挿入', '矢印キー: 行数・列数 ／ Enter: 挿入 ／ I: 数値で指定 ／ Esc: キャンセル');
+  const label = h('div', { style: { marginBottom: '6px', fontWeight: 'bold' } });
+  const grid = h('div', { class: 'table-picker' });
+  const cells = [];
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) { const el = h('div'); cells.push({ r, c, el }); grid.append(el); }
+  d.body.append(label, grid);
+  const size = { r: 2, c: 3 };
+  const render = () => {
+    label.textContent = `表 (${size.c} × ${size.r})`;
+    for (const x of cells) x.el.classList.toggle('on', x.r < size.r && x.c < size.c);
+  };
+  d.handleKey = (e) => {
+    switch (e.key) {
+      case 'Escape': d.close(null); return true;
+      case 'Enter': d.close({ rows: size.r, cols: size.c }); return true;
+      case 'ArrowRight': size.c = Math.min(COLS, size.c + 1); break;
+      case 'ArrowLeft': size.c = Math.max(1, size.c - 1); break;
+      case 'ArrowDown': size.r = Math.min(ROWS, size.r + 1); break;
+      case 'ArrowUp': size.r = Math.max(1, size.r - 1); break;
+      default:
+        if (e.key.toLowerCase() === 'i' && !e.ctrlKey && !e.altKey) {
+          d.close('dialog');
+          return true;
+        }
+        return true;
+    }
+    render();
+    return true;
+  };
+  render();
+  return d.show();
+}

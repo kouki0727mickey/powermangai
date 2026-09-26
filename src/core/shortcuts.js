@@ -17,6 +17,7 @@ export const BINDINGS = [
   { action: 'copy', keys: ['Ctrl+C', 'Ctrl+Insert'], contexts: ES, category: '編集', label: 'コピー' },
   { action: 'cut', keys: ['Ctrl+X', 'Shift+Delete'], contexts: ES, category: '編集', label: '切り取り' },
   { action: 'paste', keys: ['Ctrl+V', 'Shift+Insert'], contexts: ES, category: '編集', label: '貼り付け' },
+  { action: 'pasteSpecial', keys: ['Ctrl+Alt+V'], contexts: ES, category: '編集', label: '形式を選択して貼り付け' },
   { action: 'duplicate', keys: ['Ctrl+D'], contexts: ES, category: '編集', label: '複製（オブジェクト / スライド）' },
   { action: 'selectAll', keys: ['Ctrl+A'], contexts: E, category: '選択', label: 'すべてのオブジェクトを選択' },
   { action: 'selectNext', keys: ['Tab'], contexts: E, category: '選択', label: '次のオブジェクトを選択' },

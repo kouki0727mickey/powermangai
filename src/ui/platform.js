@@ -66,3 +66,21 @@ export async function setFullScreen(flag) {
     // 全画面にできなくてもスライドショーは続行する
   }
 }
+
+/** システムのクリップボード: { text, image（dataURL）} */
+export async function readSystemClipboard() {
+  if (api) return api.readClipboard();
+  const out = { text: '', image: null };
+  try { out.text = await navigator.clipboard.readText(); } catch { /* 読めない環境では空 */ }
+  return out;
+}
+
+/** dataURL の画像の元のサイズ */
+export function imageSize(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve({ w: img.naturalWidth || 100, h: img.naturalHeight || 100 });
+    img.onerror = () => reject(new Error('画像を読み込めません'));
+    img.src = src;
+  });
+}

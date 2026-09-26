@@ -95,7 +95,7 @@ function placeholderView(o) {
   };
 }
 
-function drawTable(ctx, o, theme) {
+function drawTable(ctx, o, theme, hideCell) {
   const lay = tableLayout(o, measureText, theme);
   const accent = resolveColor('@accent1', theme);
   o.cells.forEach((row, r) => row.forEach((cell, c) => {
@@ -109,6 +109,7 @@ function drawTable(ctx, o, theme) {
       ctx.fillStyle = resolveColor(fill, theme);
       ctx.fillRect(x, y, w, h);
     }
+    if (hideCell && hideCell.r === r && hideCell.c === c) return; // 編集中のセルの文字は DOM で表示
     const cellObj = { type: 'rect', w, h, inset: o.cellInset || { l: 7.2, t: 3.6, r: 7.2, b: 3.6 }, anchor: 'top', wrap: true, paragraphs: cell.paragraphs };
     const { lines } = layoutObjectText(cellObj, measureText, theme);
     ctx.save();
@@ -162,7 +163,7 @@ export function drawObject(ctx, o, opts = {}) {
     }
   } else if (o.type === 'table') {
     ctx.shadowColor = 'transparent';
-    drawTable(ctx, o, theme);
+    drawTable(ctx, o, theme, opts.hideCell);
   } else {
     ctx.beginPath();
     buildShape(ctx, o.type, o.w, o.h);
@@ -255,7 +256,10 @@ export function drawSlide(ctx, slide, width, height, opts = {}) {
       }
       if (st.clip) { ctx.beginPath(); ctx.rect(st.clip.x, st.clip.y, st.clip.w, st.clip.h); ctx.clip(); }
     }
-    drawObject(ctx, o, { theme, showPlaceholder: opts.showPlaceholder, hideText: o.id === opts.hideTextOf, pixelScale });
+    drawObject(ctx, o, {
+      theme, showPlaceholder: opts.showPlaceholder, hideText: o.id === opts.hideTextOf, pixelScale,
+      hideCell: o.id === opts.hideTextOf ? opts.hideCell : null,
+    });
     ctx.restore();
     if (opts.showPlaceholder && o.type === 'text' && !o.stroke && o.paragraphs.every((p) => p.runs.every((r) => !r.text))) {
       // 空のテキスト ボックスは枠を点線で表示（PowerPoint の編集画面と同様）
@@ -296,6 +300,12 @@ export function drawSelection(ctx, slide, selection, width, height, opts = {}) {
   }
   const sel = slide.objects.filter((o) => selection.includes(o.id));
   const groups = new Map();
+  if (opts.cellRect) {
+    const c = opts.cellRect;
+    ctx.strokeStyle = '#2B579A';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(c.x * sx, c.y * sy, c.w * sx, c.h * sy);
+  }
   for (const o of sel) {
     ctx.save();
     ctx.translate((o.x + o.w / 2) * sx, (o.y + o.h / 2) * sy);

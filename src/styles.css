@@ -179,3 +179,7 @@ body.mouse-blocked * { cursor: not-allowed !important; }
 #show-cover { position: absolute; inset: 0; display: none; }
 #show-cover.black { display: block; background: #000; }
 #show-cover.white { display: block; background: #fff; }
+
+.table-picker { display: grid; grid-template-columns: repeat(10, 18px); gap: 3px; }
+.table-picker div { width: 18px; height: 18px; border: 1px solid #bbb; }
+.table-picker div.on { background: #fbe9e4; border-color: var(--accent); }
