@@ -119,6 +119,21 @@ npm run serve            # ブラウザで動作確認（http://127.0.0.1:8080/�
 xvfb-run -a npm run smoke   # Electron 実機の起動確認（PMG_APP_PATH でビルドしたアプリを指定可）
 ```
 
+### Web 版の公開（Cloudflare Pages）
+
+`src/` がそのまま Web 版です（ビルド不要）。GitHub Actions がテストの後に Cloudflare Pages へ公開します。
+`main` へのプッシュは本番（`https://powermangai.pages.dev`）、ほかのブランチはプレビュー用の URL に公開されます。
+
+初回だけ、次の 2 つを GitHub のリポジトリの Settings → Secrets and variables → Actions に登録してください
+（登録するまでは公開の手順はスキップされます）。
+
+| 名前 | 値 |
+| --- | --- |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare のダッシュボード右側（または URL）に表示されるアカウント ID |
+| `CLOUDFLARE_API_TOKEN` | My Profile → API Tokens → Create Token →「Custom token」で権限 Account / Cloudflare Pages / Edit を付けたトークン |
+
+ブラウザ版では Ctrl+N / Ctrl+W / Ctrl+T など、ブラウザが先に使うキーは練習できません（KeyTips から同じ機能を使えます）。
+
 ### デスクトップ アプリのビルド
 
 ```bash
