@@ -130,3 +130,13 @@ test('蛍光ペン・文字の間隔が違う文字は別の run になり、不
   const runs = n.slides[0].objects[0].paragraphs[0].runs;
   assert.deepEqual(runs.map((r) => [r.text, r.font.highlight, r.font.spacing]), [['a', '#FFFF00', undefined], ['bc', undefined, undefined]]);
 });
+
+test('書式の貼り付けは蛍光ペン・文字の間隔を消して写し、リンクは写さない', async () => {
+  const { pasteFont } = await import('../src/core/richtext.js');
+  const target = { ...F, highlight: '#FFFF00', spacing: 3, link: 'https://a.example/' };
+  pasteFont(target, { ...F, bold: true, link: 'https://b.example/' });
+  assert.equal(target.highlight, undefined);
+  assert.equal(target.spacing, undefined);
+  assert.equal(target.bold, true);
+  assert.equal(target.link, 'https://a.example/');
+});

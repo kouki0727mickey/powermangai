@@ -44,8 +44,8 @@ export const KEYTIPS = {
   children: [
     // クイック アクセス ツール バー（既定: 上書き保存・元に戻す・やり直し）
     { key: '1', label: '上書き保存（クイック アクセス）', action: 'save', qat: true },
-    { key: '2', label: '元に戻す（クイック アクセス）', action: 'undo', qat: true },
-    { key: '3', label: 'やり直し（クイック アクセス）', action: 'redo', qat: true },
+    { key: '2', label: '元に戻す（クイック アクセス）', action: 'qatUndo', qat: true },
+    { key: '3', label: 'やり直し（クイック アクセス）', action: 'qatRedo', qat: true },
     {
       key: 'F', label: 'ファイル',
       children: [

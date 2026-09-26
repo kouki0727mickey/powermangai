@@ -1110,3 +1110,15 @@ test('蛍光ペン（Alt → H → T → H）・文字の間隔（Alt → H → 
   assert.equal((await download).suggestedFilename(), 'qat.pptx');
   assert.deepEqual(errors, []);
 });
+
+test('編集中の Alt → 2 は入力中の操作を 1 つだけ戻す', async () => {
+  await fresh();
+  await keys('Tab');
+  await page.keyboard.type('AB');
+  await keys('Control+b');
+  await alt('2');
+  assert.equal(await ed(() => __pmg.editor.editingId !== null), true, '編集は続く');
+  await keys('Escape');
+  const r = await ed(() => __pmg.editor.slide.objects[0].paragraphs[0].runs.map((x) => [x.text, x.font.bold]));
+  assert.deepEqual(r, [['AB', false]]);
+});

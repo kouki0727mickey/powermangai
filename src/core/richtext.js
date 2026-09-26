@@ -263,3 +263,12 @@ export function applyFontAll(paras, fn) {
 export function allRunFonts(paras) {
   return paras.flatMap((p) => p.runs.map((r) => r.font));
 }
+
+/** 書式の貼り付け: 指定がないときに省く書式（蛍光ペン・文字の間隔）も写す。リンクは写さない */
+export function pasteFont(font, src) {
+  const { link, ...rest } = src;
+  delete font.highlight;
+  delete font.spacing;
+  Object.assign(font, JSON.parse(JSON.stringify(rest)));
+  return font;
+}

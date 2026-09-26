@@ -4,7 +4,7 @@ import {
 } from './model.js';
 import { fitTable, createTable, insertRow, insertColumn, deleteRow, deleteColumn } from './table.js';
 import {
-  fromPlainText, applyFontAll, allRunFonts, normalizeParagraph, MAX_LEVEL,
+  fromPlainText, applyFontAll, allRunFonts, normalizeParagraph, MAX_LEVEL, pasteFont,
 } from './richtext.js';
 import { layoutObjectText, approxMeasure } from './textlayout.js';
 import { themeOf } from './colors.js';
@@ -556,7 +556,7 @@ export class Editor {
       o.opacity = f.opacity;
       o.shadow = f.shadow;
       if (hasText(o) && f.font) {
-        applyFontAll(o.paragraphs, (font) => Object.assign(font, clone(f.font)));
+        applyFontAll(o.paragraphs, (font) => pasteFont(font, f.font));
         for (const p of o.paragraphs) Object.assign(p, f.para);
       }
     });

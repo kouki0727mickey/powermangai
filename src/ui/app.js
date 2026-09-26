@@ -389,7 +389,7 @@ function renderRibbon() {
   const activeKey = s && s.stack.length > 1 ? s.path[0] : null;
   for (const t of KEYTIPS.children) {
     if (t.qat) {
-      const q = h('span', { class: 'ribbon-qat', title: t.label, text: { save: '💾', undo: '↶', redo: '↷' }[t.action] || t.label });
+      const q = h('span', { class: 'ribbon-qat', title: t.label, text: { save: '💾', qatUndo: '↶', qatRedo: '↷' }[t.action] || t.label });
       if (topLevel && t.key.startsWith(s.buffer)) q.append(h('span', { class: 'badge', text: t.key }));
       tabs.append(q);
       continue;
@@ -503,7 +503,7 @@ const TEXT_KEEP = new Set([
   'input:fontSize', 'input:fontFamily', 'palette:fontColor', 'bullets', 'numbering', 'demote', 'promote',
   'lineSpacing1', 'lineSpacing15', 'lineSpacing2', 'gallery:lineSpacing', 'moveParaUp', 'moveParaDown',
   'textUndo', 'textRedo', 'copyFormat', 'pasteFormat', 'textAnchor', 'save', 'saveAs', 'palette:cellFill',
-  'hyperlink', 'insertSymbol', 'textDirection', 'palette:highlight', 'gallery:spacing',
+  'hyperlink', 'insertSymbol', 'textDirection', 'palette:highlight', 'gallery:spacing', 'qatUndo', 'qatRedo',
 ]);
 
 // ------------------------------------------------------------------ アクション
@@ -661,6 +661,9 @@ const ACTIONS = {
   textAnchor: (v) => (editor.editingId || editor.selection.length ? editor.setObjectProp('anchor', v, hasText) || needSelection() : needSelection()),
   textUndo: () => rich.undo() || setStatus('入力中の操作で元に戻せるものはありません'),
   textRedo: () => rich.redo() || setStatus('やり直す操作はありません'),
+  // クイック アクセス ツール バーの元に戻す / やり直し: 編集中は Ctrl+Z / Ctrl+Y と同じく入力中の操作を 1 つずつ
+  qatUndo: () => (editor.editingId && rich.active ? ACTIONS.textUndo() : ACTIONS.undo()),
+  qatRedo: () => (editor.editingId && rich.active ? ACTIONS.textRedo() : ACTIONS.redo()),
   copyFormat: fmt(
     () => { rich.copyFormat(); setStatus('文字の書式をコピーしました（Ctrl+Shift+V で貼り付け）'); return true; },
     () => (editor.copyFormat() ? (setStatus('書式をコピーしました（Ctrl+Shift+V で貼り付け）'), true) : false),

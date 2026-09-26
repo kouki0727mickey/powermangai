@@ -3,7 +3,7 @@
 import {
   cloneParas, normalizeParagraph, paraLength, applyFont, rangeFonts, insertText, splitParagraph, deleteRange,
   mergeWithPrevious, wordRangeAt, insertSoftBreak, comparePos, paraIndexes, clampPos, defaultRunFont, paraText,
-  MAX_LEVEL,
+  MAX_LEVEL, pasteFont,
 } from '../core/richtext.js';
 import { stepFontSize, nextCase } from '../core/editor.js';
 import { resolveColor } from '../core/colors.js';
@@ -584,7 +584,6 @@ export class RichEditor {
   copyFormat() { this.formatClip = { ...this.currentFont() }; return true; }
   pasteFormat() {
     if (!this.formatClip) return false;
-    const f = this.formatClip;
-    return this.formatRange((font) => Object.assign(font, f));
+    return this.formatRange((font) => pasteFont(font, this.formatClip));
   }
 }
