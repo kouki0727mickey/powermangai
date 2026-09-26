@@ -84,6 +84,10 @@ ipcMain.handle('clipboard:read', () => {
   };
 });
 
+ipcMain.handle('clipboard:writeText', (e, text) => {
+  if (typeof text === 'string') clipboard.writeText(text);
+});
+
 ipcMain.handle('window:fullscreen', (e, flag) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   win.setFullScreen(!!flag);

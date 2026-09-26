@@ -2,7 +2,7 @@
 import { Editor } from '../core/editor.js';
 import {
   SHAPE_TYPES, SHAPE_LABELS, LAYOUTS, createPresentation, createSlide, normalizePresentation, hasText, objFont, objText,
-  isLine, displayName, shapeStyles, LINE_WEIGHTS, createObject,
+  isLine, displayName, shapeStyles, LINE_WEIGHTS, createObject, allParas, hasTextContent,
 } from '../core/model.js';
 import { findTheme } from '../core/colors.js';
 import { keyCandidates, findBinding, prettyKey, MODIFIER_KEYS } from '../core/keys.js';
@@ -16,8 +16,8 @@ import {
   activeDialog, openPalette, openShapeGallery, openGallery, openInput, openList, openConfirm,
   openContent, openHelp, openFontDialog, openSelectionPane, openFormatShape, openTablePicker, h,
 } from './dialogs.js';
-import { openPresentationFile, savePresentationFile, openImageFile, setFullScreen, readSystemClipboard, imageSize } from './platform.js';
-import { tableLayout, CELL_INSET } from '../core/table.js';
+import { openPresentationFile, savePresentationFile, openImageFile, setFullScreen, readSystemClipboard, writeSystemClipboardText, imageSize } from './platform.js';
+import { tableLayout, CELL_INSET, cellDisplayFont } from '../core/table.js';
 
 const FONT_FAMILIES = ['+major', '+minor', 'Yu Gothic UI', '游ゴシック', 'メイリオ', 'MS ゴシック', 'MS 明朝', 'BIZ UDPゴシック', 'Arial', 'Segoe UI', 'Times New Roman', 'Consolas'];
 const LINE_SPACINGS = [1, 1.5, 2, 2.5, 3];
@@ -173,6 +173,7 @@ function editView() {
   return {
     type: 'rect', x: obj.x + lay.xs[c], y: obj.y + lay.ys[r], w: obj.colWidths[c], h: lay.heights[r],
     rotation: 0, inset: CELL_INSET, anchor: 'top', wrap: true, paragraphs: obj.cells[r][c].paragraphs,
+    displayFont: (f) => cellDisplayFont(obj, r, f),
   };
 }
 
@@ -304,6 +305,19 @@ function commitEdit() {
   editor.endEdit(paras ?? undefined);
 }
 
+/** カーソルの画面上の縦位置（行の判定用） */
+function caretTop() {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return null;
+  const range = sel.getRangeAt(0).cloneRange();
+  range.collapse(false);
+  const rect = range.getClientRects()[0] || range.getBoundingClientRect();
+  if (rect && rect.height) return rect.top;
+  // 空の段落などでは矩形が取れないので、段落要素の位置を使う
+  const n = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+  return n ? n.getBoundingClientRect().top : null;
+}
+
 /** 表のセルの移動（Tab / Shift+Tab / ↑ / ↓）。最後のセルで Tab を押すと行を追加 */
 function moveCell(dr, dc) {
   const t = editor.findObject(editor.editingId);
@@ -347,8 +361,8 @@ async function keepTextSelection(fn) {
 /** 現在の文字の書式（編集中はカーソル位置、図形選択中は先頭の文字） */
 function currentFont() {
   if (editor.editingId && rich.active) return rich.currentFont();
-  const o = editor.selectedObjects().find(hasText);
-  return o ? objFont(o) : null;
+  const o = editor.selectedObjects().find(hasTextContent);
+  return o ? allParas(o)[0].runs[0].font : null;
 }
 
 // 編集を続けたまま実行できるアクション
@@ -409,12 +423,22 @@ const ACTIONS = {
     setStatus('やり直す操作はありません');
     return false;
   },
-  copy: () => (editor.copy() ? setStatus('コピーしました') : needSelection()),
-  cut: () => (editor.cut() || needSelection()),
+  copy: async () => {
+    if (!editor.copy()) return needSelection();
+    setStatus('コピーしました');
+    await rememberClipboard();
+    return true;
+  },
+  cut: async () => {
+    if (!editor.cut()) return needSelection();
+    await rememberClipboard();
+    return true;
+  },
   paste: async () => {
-    if (editor.paste()) return true;
-    // アプリ内でコピーしたものがなければ、他のアプリでコピーした画像・文字を貼り付ける
+    // アプリ内でコピーした後に他のアプリで新しくコピーしていれば、そちらを貼り付ける
     const sys = await readSystemClipboard();
+    const newerOutside = !editor.clipboard || clipboardSignature(sys) !== app.clipSig;
+    if (!newerOutside && editor.paste()) return true;
     if (sys.image) return insertPictureFromDataUrl(sys.image);
     if (sys.text) return pasteTextAsBox(sys.text);
     setStatus('クリップボードが空です');
@@ -743,6 +767,18 @@ const REPEATABLE = new Set([
   'rotateBy', 'newSlide', 'reorder', 'arrangeAlign', 'distribute', 'pasteFormat', 'alignLeft', 'alignCenter', 'alignRight', 'alignJustify',
   'flip', 'strike', 'subscript', 'superscript', 'bullets', 'numbering', 'demote', 'promote',
 ]);
+
+function clipboardSignature(sys) {
+  return `${sys.text || ''}\u0000${sys.image ? `${sys.image.length}:${sys.image.slice(-80)}` : ''}`;
+}
+
+/** アプリ内でコピーしたときのシステムのクリップボードの状態を記録（文字があれば書き込む） */
+async function rememberClipboard() {
+  const clip = editor.clipboard;
+  const text = clip && clip.kind === 'objects' ? clip.items.filter(hasTextContent).map((o) => allParas(o).map((p) => p.runs.map((r) => r.text).join('')).join('\n')).filter(Boolean).join('\n') : '';
+  await writeSystemClipboardText(text);
+  app.clipSig = clipboardSignature(await readSystemClipboard());
+}
 
 async function insertPictureFromDataUrl(dataUrl) {
   try {
@@ -1168,10 +1204,17 @@ function onKeyDown(e) {
       // 表: Tab / Shift+Tab でセルを移動。↑ / ↓ は先頭 / 末尾の段落にいるとき上下のセルへ
       if (e.key === 'Tab') { e.preventDefault(); moveCell(0, e.shiftKey ? -1 : 1); return; }
       if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey) {
-        rich.sync();
-        const { from } = rich.getSel();
-        if (e.key === 'ArrowUp' && from.p === 0) { e.preventDefault(); moveCell(-1, 0); return; }
-        if (e.key === 'ArrowDown' && from.p === rich.paras.length - 1) { e.preventDefault(); moveCell(1, 0); return; }
+        // まずブラウザにカーソルを動かさせ、動かなかった（最初 / 最後の行だった）ときだけ上下のセルへ移る
+        // （同じ行の先頭 / 末尾へ移動するだけの場合もあるので、位置ではなく行の高さで判断する）
+        const before = caretTop();
+        const cell = editor.editingCell;
+        const dir = e.key === 'ArrowUp' ? -1 : 1;
+        setTimeout(() => {
+          if (!rich.active || editor.editingCell !== cell) return;
+          const after = caretTop();
+          if (before === null || after === null || Math.abs(after - before) < 2) moveCell(dir, 0);
+        }, 0);
+        return;
       }
     }
     if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) rich.softBreak(); else rich.enter(); return; }

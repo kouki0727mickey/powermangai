@@ -646,3 +646,40 @@ test('アプリ内でコピーしていないときの Ctrl+V は他のアプリ
   assert.equal(await page.$$eval('.list li', (els) => els.length), 2);
   await keys('Escape');
 });
+
+test('表のセル内で折り返した行は ↑ / ↓ で行を移動し、最初の行の ↑ で上のセルへ', async () => {
+  await fresh();
+  await alt('n', 't'); await keys('ArrowLeft', 'ArrowLeft', 'Enter'); // 1 列 × 2 行
+  await page.keyboard.type('上');
+  await keys('Tab');
+  await page.keyboard.type('とても長い文字を入力して、セルの中で複数の行に折り返されるようにします。とても長い文字を入力して、セルの中で複数の行に折り返されるようにします。');
+  await keys('ArrowUp');
+  await page.waitForTimeout(50);
+  assert.deepEqual(await ed(() => __pmg.editor.editingCell), { r: 1, c: 0 }, '折り返しの 1 行上へ（セル内）');
+  await keys('Control+Home', 'ArrowUp');
+  await page.waitForFunction(() => __pmg.editor.editingCell?.r === 0);
+});
+
+test('アプリ内でコピーした後に他のアプリでコピーしたものは Ctrl+V で貼り付けられる', async () => {
+  await fresh();
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await keys('Tab', 'Control+c');
+  await page.waitForFunction(() => __pmg.app.clipSig !== undefined);
+  await ed(() => navigator.clipboard.writeText('あとからコピー'));
+  await keys('Control+v');
+  await page.waitForFunction(() => __pmg.editor.selectedObjects()[0]?.type === 'text' && __pmg.text(__pmg.editor.selectedObjects()[0]) === 'あとからコピー');
+  await keys('Tab', 'Control+c');
+  await page.waitForFunction(() => __pmg.app.clipSig && !__pmg.app.clipSig.startsWith('あとから'));
+  const n = await ed(() => __pmg.editor.slide.objects.length);
+  await keys('Control+v');
+  await page.waitForFunction((k) => __pmg.editor.slide.objects.length === k + 1, n);
+  assert.equal(await ed(() => __pmg.editor.selectedObjects()[0].placeholder), 'タイトルを入力', 'アプリ内のコピーが貼り付けられる');
+});
+
+test('表を選択して Ctrl+T でフォント ダイアログが開く', async () => {
+  await fresh();
+  await alt('n', 't'); await keys('Enter', 'Escape', 'Control+t');
+  await page.waitForSelector('#fd-size');
+  assert.equal(await page.inputValue('#fd-size'), '18');
+  await keys('Escape');
+});

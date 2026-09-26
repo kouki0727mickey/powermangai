@@ -51,6 +51,7 @@ export class RichEditor {
   // ------------------------------------------------------------ 開始・終了
   /** obj の文字の編集を開始。clear: 文字を消して始める（選択中に文字を打ったとき） */
   begin(obj, theme, scale, { clear = false, select = 'end' } = {}) {
+    this.displayFont = obj.displayFont || ((f) => f);
     this.theme = theme;
     this.scale = scale;
     this.obj = obj;
@@ -75,6 +76,7 @@ export class RichEditor {
    * 変換中の DOM を壊さないよう、ここでは DOM を作り直さない（確定後に作り直す）。
    */
   beginFromTyping(obj, theme, scale) {
+    this.displayFont = obj.displayFont || ((f) => f);
     this.theme = theme;
     this.scale = scale;
     this.obj = obj;
@@ -127,7 +129,9 @@ export class RichEditor {
   }
 
   // ------------------------------------------------------------ DOM の生成と読み戻し
-  runStyle(font) {
+  runStyle(rawFont) {
+    // 表示用の書式（表のタイトル行など）。モデルの書式は変えない
+    const font = this.displayFont ? this.displayFont(rawFont) : rawFont;
     const ef = effectiveFont(font, this.theme);
     const s = this.scale;
     const deco = [font.underline ? 'underline' : '', font.strike ? 'line-through' : ''].filter(Boolean).join(' ') || 'none';
@@ -137,7 +141,7 @@ export class RichEditor {
 
   paraStyle(p, label) {
     const s = this.scale;
-    const f = p.runs[0].font;
+    const f = this.displayFont ? this.displayFont(p.runs[0].font) : p.runs[0].font;
     const ef = effectiveFont({ ...f, baseline: 0 }, this.theme);
     const indent = p.level * LEVEL_INDENT + (label ? BULLET_HANG : 0);
     return `text-align:${p.align === 'justify' ? 'justify' : p.align};padding-left:${indent * s}px;`

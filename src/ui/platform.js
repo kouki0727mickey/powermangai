@@ -84,3 +84,12 @@ export function imageSize(src) {
     img.src = src;
   });
 }
+
+/** システムのクリップボードに文字を書き込む（空文字なら何もしない） */
+export async function writeSystemClipboardText(text) {
+  if (!text) return;
+  try {
+    if (api) await api.writeClipboardText(text);
+    else await navigator.clipboard.writeText(text);
+  } catch { /* 書き込めない環境では無視 */ }
+}

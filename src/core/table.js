@@ -7,8 +7,17 @@ import { DEFAULT_THEME } from './colors.js';
 export const CELL_INSET = { l: 7.2, t: 3.6, r: 7.2, b: 3.6 };
 const ROW_H = 37;
 
-export function createCell(text = '', header = false) {
-  return { paragraphs: fromPlainText(text, defaultRunFont({ color: header ? '@bg1' : '@tx1', bold: header })), fill: null };
+export function createCell(text = '') {
+  return { paragraphs: fromPlainText(text, defaultRunFont()), fill: null };
+}
+
+/**
+ * 表のスタイルによる文字の見た目（タイトル行は白の太字）。セルには保存せず、表示のときだけ適用する
+ * ので、タイトル行をオフにしたり行を挿入したりしても文字の色が残らない。
+ */
+export function cellDisplayFont(o, r, font) {
+  if (!(o.headerRow && r === 0)) return font;
+  return { ...font, bold: true, color: font.color === '@tx1' ? '@bg1' : font.color };
 }
 
 /** rows × cols の表（既定の幅はスライド幅 - 余白） */
@@ -23,7 +32,7 @@ export function createTable(rows, cols, props = {}) {
     bandedRows: true,
     colWidths: Array.from({ length: cols }, () => w / cols),
     rowHeights: Array.from({ length: rows }, () => ROW_H),
-    cells: Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, () => createCell('', r === 0))),
+    cells: Array.from({ length: rows }, () => Array.from({ length: cols }, () => createCell(''))),
     ...props,
   });
 }
@@ -55,15 +64,14 @@ export function fitTable(o, measure, theme) {
 }
 
 export function insertRow(o, at) {
-  const header = o.headerRow && at === 0;
-  o.cells.splice(at, 0, o.colWidths.map(() => createCell('', header)));
+  o.cells.splice(at, 0, o.colWidths.map(() => createCell('')));
   o.rowHeights.splice(at, 0, ROW_H);
 }
 
 export function insertColumn(o, at) {
   const w = o.w / o.colWidths.length;
   o.colWidths.splice(at, 0, w);
-  o.cells.forEach((row, r) => row.splice(at, 0, createCell('', o.headerRow && r === 0)));
+  o.cells.forEach((row) => row.splice(at, 0, createCell('')));
   // 表全体の幅は保ち、列幅を比例配分
   const total = o.colWidths.reduce((a, b) => a + b, 0);
   o.colWidths = o.colWidths.map((cw) => (cw * o.w) / total);

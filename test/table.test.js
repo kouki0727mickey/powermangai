@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createTable, tableLayout, insertRow, insertColumn, deleteRow, deleteColumn, fitTable } from '../src/core/table.js';
+import { createTable, tableLayout, insertRow, insertColumn, deleteRow, deleteColumn, fitTable, cellDisplayFont } from '../src/core/table.js';
 import { Editor } from '../src/core/editor.js';
 import { createPresentation, createSlide, normalizePresentation, objFont, allParas } from '../src/core/model.js';
 import { fromPlainText, defaultRunFont } from '../src/core/richtext.js';
@@ -21,7 +21,7 @@ test('表の作成と行・列の追加削除（列を追加しても表の幅�
   assert.equal(Math.round(t.colWidths.reduce((a, b) => a + b)), 600);
   insertRow(t, 0);
   assert.equal(t.cells.length, 3);
-  assert.equal(t.cells[0][0].paragraphs[0].runs[0].font.bold, true, '先頭に追加した行は見出しの書式');
+  assert.equal(t.cells[0][0].paragraphs[0].runs[0].font.bold, false, 'タイトル行の書式はセルに保存しない');
   assert.equal(deleteRow(t, 0), true);
   assert.equal(deleteColumn(t, 0), true);
   assert.equal(Math.round(t.colWidths.reduce((a, b) => a + b)), 600);
@@ -121,4 +121,14 @@ test('表と図は保存・読み込みで保たれる。不正な表・画像�
   const t = JSON.parse(JSON.stringify(e.pres.slides[0].objects[0]));
   t.colWidths = [100];
   assert.throws(() => normalizePresentation(bad(t)), /列幅/);
+});
+
+test('タイトル行の見た目は表示時だけ（オフにすると通常の色）', () => {
+  const t = createTable(2, 2);
+  const f = t.cells[0][0].paragraphs[0].runs[0].font;
+  assert.deepEqual([cellDisplayFont(t, 0, f).color, cellDisplayFont(t, 0, f).bold], ['@bg1', true]);
+  assert.equal(cellDisplayFont(t, 1, f), f);
+  assert.equal(cellDisplayFont(t, 0, { ...f, color: '#FF0000' }).color, '#FF0000', '色を指定した文字はそのまま');
+  t.headerRow = false;
+  assert.equal(cellDisplayFont(t, 0, f), f);
 });

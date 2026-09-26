@@ -3,7 +3,7 @@ import { SLIDE_W, SLIDE_H, bounds, isLine, hasText } from '../core/model.js';
 import { layoutObjectText, effectiveFont } from '../core/textlayout.js';
 import { buildShape, buildDetail, EVENODD } from '../core/shapes.js';
 import { resolveColor, findTheme, DEFAULT_THEME } from '../core/colors.js';
-import { tableLayout } from '../core/table.js';
+import { tableLayout, cellDisplayFont } from '../core/table.js';
 
 const FONT_FALLBACK = '"Yu Gothic UI", "Yu Gothic", Meiryo, "Hiragino Sans", "Noto Sans CJK JP", "Noto Sans JP", sans-serif';
 
@@ -110,7 +110,8 @@ function drawTable(ctx, o, theme, hideCell) {
       ctx.fillRect(x, y, w, h);
     }
     if (hideCell && hideCell.r === r && hideCell.c === c) return; // 編集中のセルの文字は DOM で表示
-    const cellObj = { type: 'rect', w, h, inset: o.cellInset || { l: 7.2, t: 3.6, r: 7.2, b: 3.6 }, anchor: 'top', wrap: true, paragraphs: cell.paragraphs };
+    const paragraphs = cell.paragraphs.map((p) => ({ ...p, runs: p.runs.map((ru) => ({ ...ru, font: cellDisplayFont(o, r, ru.font) })) }));
+    const cellObj = { type: 'rect', w, h, inset: o.cellInset || { l: 7.2, t: 3.6, r: 7.2, b: 3.6 }, anchor: 'top', wrap: true, paragraphs };
     const { lines } = layoutObjectText(cellObj, measureText, theme);
     ctx.save();
     ctx.translate(x, y);

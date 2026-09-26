@@ -7,4 +7,5 @@ contextBridge.exposeInMainWorld('pmg', {
   openImage: () => ipcRenderer.invoke('image:open'),
   setFullScreen: (flag) => ipcRenderer.invoke('window:fullscreen', flag),
   readClipboard: () => ipcRenderer.invoke('clipboard:read'),
+  writeClipboardText: (text) => ipcRenderer.invoke('clipboard:writeText', text),
 });
