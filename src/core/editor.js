@@ -82,8 +82,9 @@ export class Editor {
     this.fitOnly = null;
     this.pruneAnimations();
     // 文字の編集中の変更は、編集の終了時に編集全体と合わせて 1 回の操作として履歴に積む
-    if (!this.editingId && JSON.stringify(this.pres) !== presBefore) {
-      this.revision += 1;
+    const changed = JSON.stringify(this.pres) !== presBefore;
+    if (changed) this.revision += 1;
+    if (changed && !this.editingId) {
       // アウトラインの続けての入力は、最初の入力の前の状態だけを履歴に残す
       if (!this.mergeHistory) this.pushUndo(before);
       this.redoStack = [];
@@ -911,10 +912,11 @@ export class Editor {
     this.fitAll();
     this.editingId = null;
     this.editingCell = null;
+    // 入力中の変更は previewEdit で数えてあるので、終了時に文字が変わったときだけ数える
+    if (obj && JSON.stringify(obj.paragraphs) !== beforeEnd) this.revision += 1;
     if (JSON.stringify(this.pres) !== this.editPresBefore) {
-      this.undoStack.push(this.editBefore);
+      this.pushUndo(this.editBefore);
       this.outlineMergeKey = null;
-      if (this.undoStack.length > HISTORY_LIMIT) this.undoStack.shift();
       this.redoStack = [];
     }
     this.emit();

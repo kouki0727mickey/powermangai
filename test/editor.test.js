@@ -341,3 +341,22 @@ test('保存データの正規化と検証', () => {
   assert.equal(objFont(ok.slides[0].objects[0]).bold, false);
   assert.equal(ok.slides[0].objects[0].groupId, null);
 });
+
+test('変更回数（未保存の変更の判定）: 編集中の操作と編集の終了時の変更も数える', async () => {
+  const { Editor } = await import('../src/core/editor.js');
+  const { createPresentation } = await import('../src/core/model.js');
+  const e = new Editor(createPresentation());
+  e.setSelection([e.slide.objects[0].id]);
+  e.startEdit();
+  const r0 = e.revision;
+  e.setFont('bold', true); // 編集中の mutate
+  assert.ok(e.revision > r0);
+  const r1 = e.revision;
+  e.endEdit('終了時に入力');
+  assert.ok(e.revision > r1, '終了時に文字が変わった');
+  const r2 = e.revision;
+  e.setSelection([e.slide.objects[0].id]);
+  e.startEdit();
+  e.endEdit();
+  assert.equal(e.revision, r2, '何も変えずに終了しても増えない');
+});

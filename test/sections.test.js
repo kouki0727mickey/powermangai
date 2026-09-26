@@ -120,3 +120,12 @@ test('セクションをまたいで複数のスライドを動かしても、�
   assert.ok(e.pres.sections[0].slideIds.includes('s0'), 's0 は既定のセクションのまま');
   assert.deepEqual(e.pres.sections[1].slideIds, ['s3', 's4']);
 });
+
+test('同じセクションの中で上へ動かしたスライドは、そのセクションのまま', () => {
+  const e = five();
+  e.gotoSlide(1); e.addSection('B'); // A=[s0] B=[s1,s2,s3,s4]
+  e.gotoSlide(2);
+  e.moveSlide(-1);
+  assert.equal(order(e), 's0,s2,s1,s3,s4');
+  assert.deepEqual(layout(e), ['既定のセクション:s0', 'B:s2,s1,s3,s4']);
+});

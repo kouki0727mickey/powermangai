@@ -246,8 +246,8 @@ export function moveSlides(pres, idx, dir) {
   const block = pres.slides.splice(first, count);
   pres.slides.splice(to, 0, ...block);
   if (secs.length) {
-    // 動かしたスライドは、移動先の隣（前、先頭なら後ろ）のスライドのセクションへ
-    const neighbor = pres.slides[to - 1] || pres.slides[to + count];
+    // 動かしたスライドは、入れ替わったスライドのセクションへ
+    const neighbor = dir < 0 ? pres.slides[to + count] : pres.slides[to - 1];
     const target = secs.find((sec) => sec.slideIds.includes(neighbor.id));
     for (const sec of secs) sec.slideIds = sec.slideIds.filter((id) => !ids.includes(id));
     target.slideIds.push(...ids);
