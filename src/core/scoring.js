@@ -1,6 +1,6 @@
 // 作成したスライドと完成形（お手本）の比較・採点
 import { SHAPE_LABELS, hasText, objText, objFont, objAlign } from './model.js';
-import { colorName, resolveColor, findTheme } from './colors.js';
+import { colorName, resolveColor, findTheme, themeOf } from './colors.js';
 
 export const POS_TOLERANCE = 10;
 export const SIZE_TOLERANCE = 10;
@@ -169,8 +169,8 @@ function insertHint(t) {
  * 採点。戻り値: { score: 0-100, passed, total, checks: [{ ok, message, hint, weight }] }
  */
 export function scorePresentation(user, target) {
-  TH_T = findTheme(target.theme);
-  TH_U = findTheme(user.theme);
+  TH_T = themeOf(target);
+  TH_U = themeOf(user);
   const checks = [];
   const n = Math.max(target.slides.length, user.slides.length);
   for (let i = 0; i < n; i++) {

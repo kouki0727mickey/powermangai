@@ -35,6 +35,29 @@ export function findTheme(id) {
   return THEMES.find((t) => t.id === id) || DEFAULT_THEME;
 }
 
+/** プレゼンテーションのテーマ（.pptx から読み込んだ独自のテーマにも対応） */
+export function themeOf(pres) {
+  if (pres && pres.theme === 'custom' && pres.customTheme) return pres.customTheme;
+  return findTheme(pres && pres.theme);
+}
+
+/** 独自のテーマの検証（不正なら null） */
+export function checkCustomTheme(t) {
+  if (!t || typeof t !== 'object' || !t.colors || !t.fonts) return null;
+  const colors = {};
+  for (const k of [...Object.keys(DEFAULT_THEME.colors)]) {
+    const c = t.colors[k];
+    colors[k] = typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c) ? c.toUpperCase() : DEFAULT_THEME.colors[k];
+  }
+  const font = (f, d) => (typeof f === 'string' && f ? f.slice(0, 100) : d);
+  return {
+    id: 'custom',
+    name: typeof t.name === 'string' ? t.name.slice(0, 100) : '読み込んだテーマ',
+    colors,
+    fonts: { major: font(t.fonts.major, DEFAULT_THEME.fonts.major), minor: font(t.fonts.minor, DEFAULT_THEME.fonts.minor) },
+  };
+}
+
 export const STANDARD_COLORS = [
   { hex: '#C00000', name: '濃い赤' },
   { hex: '#FF0000', name: '赤' },

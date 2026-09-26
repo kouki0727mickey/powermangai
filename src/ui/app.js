@@ -19,7 +19,12 @@ import {
   openContent, openHelp, openFontDialog, openSelectionPane, openFormatShape, openTablePicker, openFindReplace, openHeaderFooter,
   openAnimationPane, h,
 } from './dialogs.js';
-import { openPresentationFile, savePresentationFile, openImageFile, setFullScreen, readSystemClipboard, writeSystemClipboardText, imageSize, printDocument } from './platform.js';
+import {
+  openPresentationFile, chooseSavePath, writePresentationFile, reportDirty, closeWindow, onSaveAndClose,
+  openImageFile, setFullScreen, readSystemClipboard, writeSystemClipboardText, imageSize, printDocument,
+} from './platform.js';
+import { importPptx } from '../core/pptx-read.js';
+import { exportPptx } from '../core/pptx-write.js';
 import { tableLayout, CELL_INSET, cellDisplayFont } from '../core/table.js';
 
 const FONT_FAMILIES = ['+major', '+minor', 'Yu Gothic UI', '游ゴシック', 'メイリオ', 'MS ゴシック', 'MS 明朝', 'BIZ UDPゴシック', 'Arial', 'Segoe UI', 'Times New Roman', 'Consolas'];
@@ -323,6 +328,7 @@ function renderStatus() {
 }
 
 function renderTitle() {
+  reportDirty(isDirty());
   const name = app.filePath ? app.filePath.split(/[\\/]/).pop() : '無題';
   $('doc-title').textContent = `${isDirty() ? '● ' : ''}${name}`;
   document.title = `${name} - PowerMangai`;
@@ -518,7 +524,18 @@ const ACTIONS = {
     try {
       const r = await openPresentationFile();
       if (!r) return;
-      loadPresentation(normalizePresentation(JSON.parse(r.content)), r.path);
+      if (/\.pptx$/i.test(r.path)) {
+        setStatus('PowerPoint のファイルを読み込んでいます…');
+        const { pres, warnings } = await importPptx(r.data);
+        loadPresentation(pres, r.path);
+        if (warnings.length) {
+          await openContent('読み込めなかった内容', h('div', {},
+            h('p', { text: 'このアプリでは表示できない内容があり、省略または近い形で読み込みました。上書き保存すると、これらは失われます。' }),
+            h('ul', {}, ...warnings.map((w) => h('li', { text: w })))));
+        }
+      } else {
+        loadPresentation(normalizePresentation(JSON.parse(new TextDecoder().decode(r.data))), r.path);
+      }
       setStatus('ファイルを開きました');
     } catch (err) {
       await openContent('エラー', h('p', { text: `ファイルを開けませんでした: ${err.message}` }));
@@ -536,6 +553,7 @@ const ACTIONS = {
     if (withHidden === null) return;
     await printSlides(kind, withHidden);
   },
+  closeWindow: () => closeWindow(false),
   save: () => save(false),
   saveAs: () => save(true),
 
@@ -857,7 +875,8 @@ const ACTIONS = {
 
   // デザイン
   'gallery:themes': async () => {
-    const items = THEMES.map((th) => {
+    const list = editor.pres.customTheme ? [editor.pres.customTheme, ...THEMES] : THEMES;
+    const items = list.map((th) => {
       const c = document.createElement('canvas');
       c.width = 128; c.height = 72;
       const sample = createSlide('blank');
@@ -865,8 +884,8 @@ const ACTIONS = {
         createObject('text', { x: 40, y: 150, w: 880, h: 200, text: 'Aa', font: { size: 150, family: '+major' } }),
         ...['@accent1', '@accent2', '@accent3', '@accent4', '@accent5', '@accent6'].map((col, i) => createObject('rect', { x: 40 + i * 150, y: 420, w: 140, h: 60, fill: col, stroke: null })),
       );
-      drawSlide(c.getContext('2d'), sample, 128, 72, { pres: { ...editor.pres, theme: th.id, headerFooter: {} } });
-      return { label: th.name, value: th.id, icon: c };
+      drawSlide(c.getContext('2d'), sample, 128, 72, { pres: { ...editor.pres, theme: th.id, customTheme: editor.pres.customTheme, headerFooter: {} } });
+      return { label: th.id === 'custom' ? `${th.name}（読み込んだテーマ）` : th.name, value: th.id, icon: c };
     });
     const v = await openGallery('テーマ', items, { columns: 4 });
     if (v) { editor.setTheme(v); thumbCache = []; }
@@ -1213,18 +1232,33 @@ function togglePane(dir = 1) {
   render();
 }
 
+/** 保存。形式はファイルの拡張子で決まる（.pptx = PowerPoint、それ以外 = このアプリの形式）。保存したら true */
 async function save(saveAs) {
   commitEdit();
+  leaveNotes();
   try {
-    const r = await savePresentationFile(app.filePath, JSON.stringify(editor.pres, null, 2), saveAs);
-    if (!r) return;
+    const target = await chooseSavePath(app.filePath, saveAs, 'presentation.pptx');
+    if (!target) return false;
+    const content = /\.pptx$/i.test(target) ? await exportPptx(editor.pres) : JSON.stringify(editor.pres, null, 2);
+    const r = await writePresentationFile(target, content);
     app.filePath = r.path;
     markSaved();
-    setStatus('保存しました');
+    setStatus(`保存しました: ${r.path.split(/[\\/]/).pop()}`);
+    return true;
   } catch (err) {
     await openContent('エラー', h('p', { text: `保存できませんでした: ${err.message}` }));
+    return false;
   }
 }
+
+// ウィンドウを閉じるときに「保存する」を選んだ場合
+onSaveAndClose(async () => {
+  if (await save(false)) closeWindow(true);
+});
+window.addEventListener('beforeunload', (e) => {
+  // ブラウザ版: 保存していない変更があれば確認（Electron ではメイン プロセスが確認する）
+  if (!globalThis.pmg && isDirty()) e.preventDefault();
+});
 
 /** アクションの実行。source は記録用のキー表記 */
 async function runAction(action, args, { keys = '', label = '', repeat = false } = {}) {

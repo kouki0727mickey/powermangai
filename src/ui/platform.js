@@ -28,25 +28,49 @@ function readAs(file, method) {
   });
 }
 
-/** @returns {Promise<{path: string, content: string} | null>} */
+/** @returns {Promise<{ path: string, data: Uint8Array } | null>} */
 export async function openPresentationFile() {
   if (api) return api.openFile();
-  const file = await pickFile('.json,application/json');
+  const file = await pickFile('.pptx,.json,application/json,application/vnd.openxmlformats-officedocument.presentationml.presentation');
   if (!file) return null;
-  return { path: file.name, content: await readAs(file, 'readAsText') };
+  return { path: file.name, data: new Uint8Array(await readAs(file, 'readAsArrayBuffer')) };
 }
 
-/** @returns {Promise<{path: string} | null>} */
-export async function savePresentationFile(path, content, saveAs) {
-  if (api) return api.saveFile(path, content, saveAs);
-  const name = (saveAs || !path ? prompt('ファイル名', path || 'presentation.pmg.json') : path);
-  if (!name) return null;
+/** 保存先のパス（形式は拡張子で決まる）。キャンセルなら null */
+export async function chooseSavePath(current, saveAs, defaultName) {
+  if (api) return api.chooseSavePath(current, saveAs, defaultName);
+  if (current && !saveAs) return current;
+  // ブラウザでは名前を聞いてダウンロードする
+  // eslint-disable-next-line no-alert
+  return prompt('ファイル名（.pptx または .json）', current || defaultName || 'presentation.pptx');
+}
+
+export async function writePresentationFile(path, content) {
+  if (api) return api.writeFile(path, content);
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
-  a.download = name;
+  const type = typeof content === 'string' ? 'application/json' : 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+  a.href = URL.createObjectURL(new Blob([content], { type }));
+  a.download = path.split(/[\\/]/).pop();
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  return { path: name };
+  return { path };
+}
+
+/** 保存していない変更の有無を伝える（ウィンドウを閉じるときの確認用） */
+let lastDirty = null;
+export function reportDirty(dirty) {
+  if (dirty === lastDirty) return;
+  lastDirty = dirty;
+  if (api) api.setDirty(dirty);
+}
+
+export function closeWindow(force = false) {
+  if (api) api.closeWindow(force);
+  else window.close();
+}
+
+export function onSaveAndClose(fn) {
+  if (api) api.onSaveAndClose(fn);
 }
 
 /** @returns {Promise<{name: string, dataUrl: string} | null>} */

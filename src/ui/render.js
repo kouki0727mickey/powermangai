@@ -2,7 +2,7 @@
 import { SLIDE_W, SLIDE_H, bounds, isLine, hasText } from '../core/model.js';
 import { layoutObjectText, effectiveFont } from '../core/textlayout.js';
 import { buildShape, buildDetail, EVENODD } from '../core/shapes.js';
-import { resolveColor, findTheme, DEFAULT_THEME } from '../core/colors.js';
+import { resolveColor, themeOf, DEFAULT_THEME } from '../core/colors.js';
 import { tableLayout, cellDisplayFont } from '../core/table.js';
 
 const FONT_FALLBACK = '"Yu Gothic UI", "Yu Gothic", Meiryo, "Hiragino Sans", "Noto Sans CJK JP", "Noto Sans JP", sans-serif';
@@ -231,7 +231,7 @@ function drawHeaderFooter(ctx, pres, slide, index, theme) {
  */
 export function drawSlide(ctx, slide, width, height, opts = {}) {
   const pres = opts.pres || { width: SLIDE_W, height: SLIDE_H, theme: 'office' };
-  const theme = findTheme(pres.theme);
+  const theme = themeOf(pres);
   const W = pres.width, H = pres.height;
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);

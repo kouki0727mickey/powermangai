@@ -2,7 +2,7 @@
 import {
   defaultRunFont, fromPlainText, plainText, normalizeParagraph, ALIGNS, BULLETS, MAX_LEVEL,
 } from './richtext.js';
-import { isColorValue, THEMES } from './colors.js';
+import { isColorValue, THEMES, checkCustomTheme } from './colors.js';
 import { TRANSITIONS, EFFECTS } from './animation.js';
 
 const TRANSITION_IDS = new Set(TRANSITIONS.map((t) => t.id));
@@ -317,6 +317,10 @@ export function normalizePresentation(data) {
   const size = { width, height };
   const pres = createPresentation(size);
   pres.theme = THEMES.some((t) => t.id === data.theme) ? data.theme : 'office';
+  if (data.theme === 'custom') {
+    const custom = checkCustomTheme(data.customTheme);
+    if (custom) { pres.theme = 'custom'; pres.customTheme = custom; }
+  }
   const hf = data.headerFooter || {};
   pres.headerFooter = {
     slideNumber: hf.slideNumber === true,

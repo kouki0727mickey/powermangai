@@ -12,6 +12,7 @@ export const BINDINGS = [
   { action: 'save', keys: ['Ctrl+S', 'Shift+F12'], contexts: ALL, category: 'ファイル', label: '上書き保存' },
   { action: 'saveAs', keys: ['F12', 'Ctrl+Shift+S'], contexts: ALL, category: 'ファイル', label: '名前を付けて保存' },
   { action: 'print', keys: ['Ctrl+P'], contexts: ALL, category: 'ファイル', label: '印刷 / PDF に出力' },
+  { action: 'closeWindow', keys: ['Ctrl+W', 'Ctrl+F4'], contexts: ALL, category: 'ファイル', label: '閉じる' },
 
   // 共通編集
   { action: 'undo', keys: ['Ctrl+Z'], contexts: ES, category: '編集', label: '元に戻す' },

@@ -5,7 +5,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PRES_FILTERS = [{ name: 'PowerMangai プレゼンテーション', extensions: ['pmg.json', 'json'] }];
+const OPEN_FILTERS = [
+  { name: 'すべてのプレゼンテーション', extensions: ['pptx', 'json'] },
+  { name: 'PowerPoint プレゼンテーション', extensions: ['pptx'] },
+  { name: 'PowerMangai プレゼンテーション', extensions: ['json'] },
+];
+const SAVE_FILTERS = [
+  { name: 'PowerPoint プレゼンテーション', extensions: ['pptx'] },
+  { name: 'PowerMangai プレゼンテーション（すべての情報を保持）', extensions: ['json'] },
+];
+const MAX_PRES_BYTES = 500 * 1024 * 1024;
 const IMAGE_FILTERS = [{ name: '画像', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'] }];
 const IMAGE_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.bmp': 'image/bmp', '.webp': 'image/webp' };
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -34,33 +43,68 @@ function createWindow() {
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   if (process.env.PMG_DEVTOOLS) win.webContents.openDevTools({ mode: 'detach' });
+  win.on('close', async (e) => {
+    if (!win.pmgDirty || win.pmgForceClose) return;
+    e.preventDefault();
+    const r = await dialog.showMessageBox(win, {
+      type: 'question',
+      buttons: ['保存する(&S)', '保存しない(&N)', 'キャンセル'],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true,
+      normalizeAccessKeys: true,
+      title: 'PowerMangai',
+      message: '変更内容を保存しますか？',
+      detail: '保存しない場合、変更内容は失われます。',
+    });
+    if (r.response === 0) win.webContents.send('app:saveAndClose');
+    else if (r.response === 1) { win.pmgForceClose = true; win.close(); }
+  });
   return win;
 }
 
 ipcMain.handle('file:open', async (e) => {
   const win = BrowserWindow.fromWebContents(e.sender);
-  const r = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: PRES_FILTERS });
+  const r = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: OPEN_FILTERS });
   if (r.canceled || r.filePaths.length === 0) return null;
   const filePath = r.filePaths[0];
+  const data = await readFile(filePath);
+  if (data.length > MAX_PRES_BYTES) throw new Error('ファイルが大きすぎます');
   approvedPaths.add(filePath);
-  return { path: filePath, content: await readFile(filePath, 'utf8') };
+  return { path: filePath, data: new Uint8Array(data.buffer, data.byteOffset, data.byteLength) };
 });
 
-ipcMain.handle('file:save', async (e, { filePath, content, saveAs }) => {
-  if (typeof content !== 'string') throw new Error('invalid content');
-  let target = filePath && approvedPaths.has(filePath) ? filePath : null;
-  if (!target || saveAs) {
-    const win = BrowserWindow.fromWebContents(e.sender);
-    const r = await dialog.showSaveDialog(win, {
-      defaultPath: target || (filePath ? path.basename(String(filePath)) : 'presentation.pmg.json'),
-      filters: PRES_FILTERS,
-    });
-    if (r.canceled || !r.filePath) return null;
-    target = r.filePath;
-    approvedPaths.add(target);
-  }
-  await writeFile(target, content, 'utf8');
-  return { path: target };
+/** 保存先を決める（上書き保存でパスが決まっていればそのまま、なければ / 名前を付けて保存ならダイアログ） */
+ipcMain.handle('file:savePath', async (e, { current, saveAs, defaultName }) => {
+  if (current && approvedPaths.has(current) && !saveAs) return current;
+  const win = BrowserWindow.fromWebContents(e.sender);
+  const r = await dialog.showSaveDialog(win, {
+    defaultPath: current && approvedPaths.has(current) ? current : (defaultName || 'presentation.pptx'),
+    filters: SAVE_FILTERS,
+  });
+  if (r.canceled || !r.filePath) return null;
+  approvedPaths.add(r.filePath);
+  return r.filePath;
+});
+
+ipcMain.handle('file:write', async (e, { filePath, content }) => {
+  if (!approvedPaths.has(filePath)) throw new Error('保存先が選ばれていません');
+  if (typeof content === 'string') await writeFile(filePath, content, 'utf8');
+  else if (content instanceof Uint8Array) await writeFile(filePath, content);
+  else throw new Error('invalid content');
+  return { path: filePath };
+});
+
+// 保存していない変更があるときは、閉じる前に確認する
+ipcMain.handle('app:setDirty', (e, dirty) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (win) win.pmgDirty = !!dirty;
+});
+ipcMain.handle('window:close', (e, { force }) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (!win) return;
+  if (force) win.pmgForceClose = true;
+  win.close();
 });
 
 ipcMain.handle('image:open', async (e) => {

@@ -909,3 +909,50 @@ test('スライドショー中の Ctrl+S（すべてのスライド）と H（�
   await keys('Escape');
   assert.equal(await page.isVisible('#slideshow'), false);
 });
+
+// ---------------------------------------------------------------- .pptx
+test('.pptx を開く（Ctrl+O）と、名前を付けて .pptx で保存（F12）', async () => {
+  await fresh();
+  const { exportPptx } = await import('../../src/core/pptx-write.js');
+  const { samplePresentation } = await import('../fixtures/sample-pres.js');
+  const bytes = await exportPptx(samplePresentation().pres);
+  const chooser = page.waitForEvent('filechooser');
+  await keys('Control+o');
+  await (await chooser).setFiles({ name: 'report.pptx', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', buffer: Buffer.from(bytes) });
+  await page.waitForFunction(() => __pmg.editor.pres.slides.length === 3);
+  assert.equal(await ed(() => __pmg.text(__pmg.editor.slide.objects[0])), '四半期の報告');
+  assert.match(await page.textContent('#doc-title'), /report\.pptx/);
+  // 画像を含むスライドも描画できる
+  await keys('PageDown', 'PageDown');
+  assert.equal(await ed(() => __pmg.editor.slide.objects.some((o) => o.type === 'image')), true);
+  page.once('dialog', (d) => d.accept('copy.pptx'));
+  const download = page.waitForEvent('download');
+  await keys('F12');
+  const dl = await download;
+  assert.equal(dl.suggestedFilename(), 'copy.pptx');
+  const buf = await (await import('node:fs/promises')).readFile(await dl.path());
+  assert.equal(buf.slice(0, 2).toString(), 'PK', 'ZIP 形式');
+  const { importPptx } = await import('../../src/core/pptx-read.js');
+  const again = await importPptx(buf);
+  assert.equal(again.pres.slides.length, 3);
+  assert.match(await page.textContent('#doc-title'), /copy\.pptx/);
+  assert.doesNotMatch(await page.textContent('#doc-title'), /●/, '保存したので変更ありの印は消える');
+  assert.deepEqual(errors, []);
+});
+
+test('読み込めない内容があれば一覧を表示する', async () => {
+  await fresh();
+  const { writeZip } = await import('../../src/core/zip.js');
+  const { buildPptxFiles } = await import('../../src/core/pptx-write.js');
+  const { samplePresentation } = await import('../fixtures/sample-pres.js');
+  const files = buildPptxFiles(samplePresentation().pres);
+  // グラフの埋め込み（未対応）を 1 つ足す
+  files['ppt/slides/slide1.xml'] = files['ppt/slides/slide1.xml'].replace('</p:spTree>', '<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="99" name="Chart 1"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="0" y="0"/><a:ext cx="100" cy="100"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"/></a:graphic></p:graphicFrame></p:spTree>');
+  const bytes = await writeZip(files);
+  const chooser = page.waitForEvent('filechooser');
+  await keys('Control+o');
+  await (await chooser).setFiles({ name: 'chart.pptx', mimeType: 'application/octet-stream', buffer: Buffer.from(bytes) });
+  await page.waitForSelector('.dialog');
+  assert.match(await page.textContent('.dialog'), /グラフ・SmartArt/);
+  await keys('Enter');
+});

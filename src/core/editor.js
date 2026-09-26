@@ -7,7 +7,7 @@ import {
   fromPlainText, applyFontAll, allRunFonts, normalizeParagraph, MAX_LEVEL,
 } from './richtext.js';
 import { layoutObjectText, approxMeasure } from './textlayout.js';
-import { findTheme } from './colors.js';
+import { themeOf } from './colors.js';
 import { replaceAll as replaceAllText, replaceMatch } from './search.js';
 import { defaultDuration } from './animation.js';
 
@@ -77,7 +77,7 @@ export class Editor {
     return result;
   }
 
-  get theme() { return findTheme(this.pres.theme); }
+  get theme() { return themeOf(this.pres); }
   get size() { return { width: this.pres.width, height: this.pres.height }; }
 
   /** 「テキストに合わせて図形のサイズを調整」: 文字の量に合わせて高さを変える */
@@ -834,7 +834,8 @@ export class Editor {
   }
 
   setTheme(id) {
-    this.mutate(() => { this.pres.theme = id; });
+    // 読み込んだテーマ（custom）は、他のテーマに切り替えても戻せるよう保持しておく
+    this.mutate(() => { this.pres.theme = id === 'custom' && !this.pres.customTheme ? 'office' : id; });
     return true;
   }
 

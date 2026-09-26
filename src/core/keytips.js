@@ -49,6 +49,8 @@ export const KEYTIPS = {
         { key: 'O', label: '開く', action: 'open' },
         { key: 'S', label: '上書き保存', action: 'save' },
         { key: 'A', label: '名前を付けて保存', action: 'saveAs' },
+        { key: 'P', label: '印刷 / PDF', action: 'print' },
+        { key: 'C', label: '閉じる', action: 'closeWindow' },
       ],
     },
     {
