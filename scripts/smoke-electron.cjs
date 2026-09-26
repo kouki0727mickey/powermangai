@@ -1,7 +1,12 @@
-// Electron 実機の起動確認（xvfb-run 上で実行）: ページが読み込まれ window.pmg と __pmg があるか
+// Electron 実機の起動確認（xvfb-run 上で実行）: ページが読み込まれ window.pmg と __pmg があるか。
+// ビルドしたアプリを確かめるときは PMG_APP_PATH に実行ファイルを指定する
 const { _electron } = require('playwright-core');
 (async () => {
-  const app = await _electron.launch({ args: ['.', '--no-sandbox'], cwd: require('path').resolve(__dirname, '..'), env: { ...process.env } });
+  // PMG_APP_PATH を指定すると、ビルドしたアプリ（実行ファイル）を起動して確かめる
+  const exe = process.env.PMG_APP_PATH;
+  const app = await _electron.launch(exe
+    ? { executablePath: exe, args: ['--no-sandbox'], env: { ...process.env } }
+    : { args: ['.', '--no-sandbox'], cwd: require('path').resolve(__dirname, '..'), env: { ...process.env } });
   const win = await app.firstWindow();
   const errors = [];
   win.on('pageerror', (e) => errors.push(e.message));

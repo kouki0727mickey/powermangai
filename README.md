@@ -115,5 +115,19 @@ test/e2e/               ブラウザで実際にキー操作する E2E テスト
 npm test                 # 単体テスト
 npm run test:e2e         # E2E テスト（Chromium が必要。CHROMIUM_PATH で指定可）
 npm run serve            # ブラウザで動作確認（http://127.0.0.1:8080/）
-xvfb-run -a node scripts/smoke-electron.cjs   # Electron 実機の起動確認
+xvfb-run -a npm run smoke   # Electron 実機の起動確認（PMG_APP_PATH でビルドしたアプリを指定可）
 ```
+
+### デスクトップ アプリのビルド
+
+```bash
+npm run dist:win         # Windows: インストーラー（Setup）とポータブル版（.exe）
+npm run dist:mac         # macOS: .dmg / .zip（Intel と Apple シリコン）
+npm run dist:linux       # Linux: AppImage
+```
+
+出力先は `dist/` です。GitHub にプッシュすると、GitHub Actions（`.github/workflows/build.yml`）が毎回テストを実行し、
+Windows・macOS・Linux 版をビルドします。できたファイルは Actions の実行結果の「Artifacts」からダウンロードできます。
+`v0.2.0` のような `v` で始まるタグをプッシュすると、GitHub のリリースにも添付されます。
+コード署名はしていないため、初回起動時に Windows SmartScreen や macOS Gatekeeper の警告が出ます
+（macOS は右クリック →「開く」で起動できます）。
