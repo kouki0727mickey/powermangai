@@ -1,6 +1,6 @@
 // アウトライン表示: スライドのタイトルと本文（プレースホルダー）を行の並びとして扱う。
 // 行: { slideId, kind: 'title' | 'body', para, level, text }。文字の書式は、変えていない部分を保つ。
-import { createSlide, hasText } from './model.js';
+import { createSlide, hasText, moveSlides } from './model.js';
 import {
   paraText, paraLength, insertText, deleteRange, splitParagraph, mergeWithPrevious, insertSoftBreak, MAX_LEVEL,
 } from './richtext.js';
@@ -117,6 +117,13 @@ export function splitLine(pres, ref, caret) {
   const si = pres.slides.indexOf(slide);
   if (ref.kind === 'title') {
     const t = titleOf(slide);
+    // タイトルの先頭で Enter: 前に空のスライドを入れる（タイトルと本文はこのスライドのまま）
+    if (caret === 0 && t && plainTitle(t).length > 0) {
+      const ns = newSlideAfter(pres, si - 1);
+      // 新しいスライドはこのスライドと同じセクションに入れる
+      pres.sections?.find((sec) => sec.slideIds.includes(slide.id))?.slideIds.push(ns.id);
+      return { ...ref };
+    }
     const ns = newSlideAfter(pres, si);
     if (t) {
       const full = paraLength(t.paragraphs[0]);
@@ -259,12 +266,8 @@ export function moveLine(pres, ref, dir) {
   const slide = slideOf(pres, ref);
   if (!slide) return null;
   if (ref.kind === 'title') {
-    const si = pres.slides.indexOf(slide);
-    const to = si + dir;
-    if (to < 0 || to >= pres.slides.length) return null;
-    pres.slides.splice(si, 1);
-    pres.slides.splice(to, 0, slide);
-    return ref;
+    // スライドの移動はスライド一覧の Ctrl+↑↓ と同じ（セクションの境目では隣のセクションへ）
+    return moveSlides(pres, [pres.slides.indexOf(slide)], dir) < 0 ? null : ref;
   }
   const paras = bodyOf(slide).paragraphs;
   const to = ref.para + dir;

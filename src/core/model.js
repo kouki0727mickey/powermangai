@@ -219,6 +219,42 @@ export function syncSections(pres) {
   }
 }
 
+/**
+ * スライド（連続した範囲 idx）を dir（-1 / 1）だけ動かす。セクションがあるときは PowerPoint と同じく、
+ * セクションの境目では並びを変えずに隣のセクションへ移し、それ以外では動かしたスライドを移動先のセクションに入れる
+ * （動かしていないスライドのセクションは変わらない）。戻り値: 動かした後の先頭の番号（動かせなければ -1）
+ */
+export function moveSlides(pres, idx, dir) {
+  const first = idx[0], count = idx.length;
+  const ids = idx.map((i) => pres.slides[i].id);
+  const secs = pres.sections || [];
+  if (secs.length) {
+    const edge = dir < 0 ? first : idx[idx.length - 1];
+    const si = sectionIndexOf(pres, edge);
+    const sec = secs[si];
+    const atEdge = dir < 0 ? sec.slideIds[0] === pres.slides[edge].id : sec.slideIds.at(-1) === pres.slides[edge].id;
+    const sameSection = idx.every((i) => sectionIndexOf(pres, i) === si);
+    if (atEdge && sameSection && secs[si + dir]) {
+      sec.slideIds = sec.slideIds.filter((id) => !ids.includes(id));
+      const next = secs[si + dir];
+      next.slideIds = dir < 0 ? [...next.slideIds, ...ids] : [...ids, ...next.slideIds];
+      return first;
+    }
+  }
+  const to = Math.max(0, Math.min(pres.slides.length - count, first + dir));
+  if (to === first) return -1;
+  const block = pres.slides.splice(first, count);
+  pres.slides.splice(to, 0, ...block);
+  if (secs.length) {
+    // 動かしたスライドは、移動先の隣（前、先頭なら後ろ）のスライドのセクションへ
+    const neighbor = pres.slides[to - 1] || pres.slides[to + count];
+    const target = secs.find((sec) => sec.slideIds.includes(neighbor.id));
+    for (const sec of secs) sec.slideIds = sec.slideIds.filter((id) => !ids.includes(id));
+    target.slideIds.push(...ids);
+  }
+  return to;
+}
+
 /** スライド番号 → セクションの番号（セクションが無ければ -1） */
 export function sectionIndexOf(pres, slideIndex) {
   const id = pres.slides[slideIndex]?.id;

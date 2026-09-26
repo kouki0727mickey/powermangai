@@ -1,7 +1,7 @@
 // エディター状態と編集コマンド（Undo/Redo 付き）。DOM には依存しない。
 import {
   clone, createObject, createSlide, createPresentation, newId, bounds, hasText, objText, isLine, allParas, hasTextContent, isFrame,
-  syncSections, sectionIndexOf, DEFAULT_SECTION_NAME,
+  syncSections, sectionIndexOf, DEFAULT_SECTION_NAME, moveSlides,
 } from './model.js';
 import { defaultChartData, checkChart } from './chart.js';
 
@@ -38,6 +38,7 @@ export class Editor {
     this.formatClipboard = null;
     this.listeners = new Set();
     this.lastMessage = '';
+    this.revision = 0; // プレゼンテーションを変えるたびに増える（未保存の変更の判定に使う）
   }
 
   // ---- 基本 ----
@@ -48,6 +49,7 @@ export class Editor {
 
   load(pres) {
     this.pres = pres;
+    this.revision += 1;
     this.slideIndex = 0;
     this.selection = [];
     this.editingId = null;
@@ -63,6 +65,7 @@ export class Editor {
   restore(snap) {
     const s = JSON.parse(snap);
     this.pres = s.pres;
+    this.revision += 1;
     this.slideIndex = Math.min(s.slideIndex, this.pres.slides.length - 1);
     this.selection = s.selection.filter((id) => this.slide.objects.some((o) => o.id === id));
     this.editingId = null;
@@ -75,16 +78,24 @@ export class Editor {
     const presBefore = JSON.stringify(this.pres);
     const result = fn();
     syncSections(this.pres);
-    this.fitAll();
+    this.fitAll(this.fitOnly);
+    this.fitOnly = null;
     this.pruneAnimations();
     // 文字の編集中の変更は、編集の終了時に編集全体と合わせて 1 回の操作として履歴に積む
     if (!this.editingId && JSON.stringify(this.pres) !== presBefore) {
-      this.undoStack.push(before);
-      if (this.undoStack.length > HISTORY_LIMIT) this.undoStack.shift();
+      this.revision += 1;
+      // アウトラインの続けての入力は、最初の入力の前の状態だけを履歴に残す
+      if (!this.mergeHistory) this.pushUndo(before);
       this.redoStack = [];
     }
     this.emit();
     return result;
+  }
+
+  /** 履歴に積む（上限を超えたら古いものから捨てる） */
+  pushUndo(snap) {
+    this.undoStack.push(snap);
+    if (this.undoStack.length > HISTORY_LIMIT) this.undoStack.shift();
   }
 
   get theme() { return themeOf(this.pres); }
@@ -106,8 +117,10 @@ export class Editor {
     }
   }
 
-  fitAll() {
+  /** 文字・表の大きさを合わせる。slideIds を指定すればそのスライドだけ */
+  fitAll(slideIds = null) {
     for (const s of this.pres.slides) {
+      if (slideIds && !slideIds.includes(s.id)) continue;
       for (const o of s.objects) {
         if (o.type === 'table') fitTable(o, this.measure, this.theme);
         else this.fitText(o);
@@ -866,7 +879,10 @@ export class Editor {
     const target = this.editTarget();
     if (!target) return;
     target.paragraphs = paragraphs.map((p) => normalizeParagraph({ ...p, runs: p.runs.map((r) => ({ text: r.text, font: { ...r.font } })) }));
-    this.fitAll();
+    // 入力のたびに呼ばれるので、編集中の図形だけを合わせる
+    const obj = this.findObject(this.editingId);
+    if (obj?.type === 'table') fitTable(obj, this.measure, this.theme); else if (obj) this.fitText(obj);
+    this.revision += 1;
     this.emit();
   }
 
@@ -885,6 +901,7 @@ export class Editor {
     const id = this.editingId;
     if (!id) return;
     const obj = this.editTarget();
+    const beforeEnd = obj ? JSON.stringify(obj.paragraphs) : '';
     if (obj && Array.isArray(text)) {
       obj.paragraphs = text.map((p) => normalizeParagraph({ ...p, runs: p.runs.map((r) => ({ text: r.text, font: { ...r.font } })) }));
     } else if (obj && typeof text === 'string' && text !== objText(obj)) {
@@ -924,13 +941,14 @@ export class Editor {
 
   previewNotes(text) {
     this.slide.notes = text;
+    this.revision += 1;
     this.emit();
   }
 
   endNotes() {
     if (!this.notesBefore) return;
     if (JSON.stringify(this.pres) !== this.notesPresBefore) {
-      this.undoStack.push(this.notesBefore);
+      this.pushUndo(this.notesBefore);
       this.outlineMergeKey = null;
       this.redoStack = [];
     }
@@ -1168,36 +1186,15 @@ export class Editor {
   /** 選択中のスライド（連続した範囲）を dir だけ移動 */
   moveSlide(dir) {
     const idx = this.selectedSlideIndexes();
-    const first = idx[0], count = idx.length;
-    // セクションの境目では、並びを変えずに隣のセクションへ移す（PowerPoint と同じ）
-    const secs = this.pres.sections || [];
-    if (secs.length) {
-      const edge = dir < 0 ? first : idx[idx.length - 1];
-      const si = sectionIndexOf(this.pres, edge);
-      const sec = secs[si];
-      const edgeId = this.pres.slides[edge].id;
-      const atEdge = dir < 0 ? sec.slideIds[0] === edgeId : sec.slideIds.at(-1) === edgeId;
-      const sameSection = idx.every((i) => sectionIndexOf(this.pres, i) === si);
-      if (atEdge && sameSection && secs[si + dir]) {
-        const ids = idx.map((i) => this.pres.slides[i].id);
-        this.mutate(() => {
-          sec.slideIds = sec.slideIds.filter((id) => !ids.includes(id));
-          const next = secs[si + dir];
-          next.slideIds = dir < 0 ? [...next.slideIds, ...ids] : [...ids, ...next.slideIds];
-          // 空のセクションを飛ばして移す場合でも、スライドの順は変わらない
-        });
-        return true;
-      }
-    }
-    const to = Math.max(0, Math.min(this.pres.slides.length - count, first + dir));
-    if (to === first) return false;
-    this.mutate(() => {
-      const block = this.pres.slides.splice(first, count);
-      this.pres.slides.splice(to, 0, ...block);
-      this.slideIndex += to - first;
-      if (this.slideAnchor !== null) this.slideAnchor += to - first;
+    const first = idx[0];
+    const to = this.mutate(() => {
+      const t = moveSlides(this.pres, idx, dir);
+      if (t < 0) return t;
+      this.slideIndex += t - first;
+      if (this.slideAnchor !== null) this.slideAnchor += t - first;
+      return t;
     });
-    return true;
+    return to >= 0;
   }
 
   // ---- セクション ----
@@ -1389,19 +1386,23 @@ export class Editor {
    */
   outlineEdit(fn, mergeKey = null) {
     let result = null;
-    // 同じ行への続けての入力（mergeKey が同じ）は 1 回の操作にまとめる
-    const merge = mergeKey && mergeKey === this.outlineMergeKey;
-    const depth = this.undoStack.length;
-    this.mutate(() => {
-      result = fn(this.pres);
-      const id = result && !result.error ? (result.ref || result).slideId : null;
-      const i = id ? this.pres.slides.findIndex((sl) => sl.id === id) : -1;
-      this.slideIndex = i >= 0 ? i : Math.min(this.slideIndex, this.pres.slides.length - 1);
-      this.selection = [];
-      this.editingId = null;
-      this.clearSlideSelection();
-    });
-    if (merge && this.undoStack.length === depth + 1) this.undoStack.pop();
+    // 同じ行への続けての入力（mergeKey が同じ）は 1 回の操作にまとめる（最初の入力の前の状態だけを履歴に残す）
+    this.mergeHistory = !!mergeKey && mergeKey === this.outlineMergeKey && this.undoStack.length > 0;
+    try {
+      this.mutate(() => {
+        result = fn(this.pres);
+        const id = result && !result.error ? (result.ref || result).slideId : null;
+        const i = id ? this.pres.slides.findIndex((sl) => sl.id === id) : -1;
+        this.slideIndex = i >= 0 ? i : Math.min(this.slideIndex, this.pres.slides.length - 1);
+        // 行の入力（入力のたびに呼ばれる）はその行のスライドだけを合わせる
+        if (mergeKey && id) this.fitOnly = [id];
+        this.selection = [];
+        this.editingId = null;
+        this.clearSlideSelection();
+      });
+    } finally {
+      this.mergeHistory = false;
+    }
     this.outlineMergeKey = mergeKey;
     return result;
   }

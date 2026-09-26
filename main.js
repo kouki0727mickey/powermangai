@@ -1,6 +1,6 @@
 // Electron メイン プロセス
 import { app, BrowserWindow, Menu, dialog, ipcMain, clipboard, shell } from 'electron';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -68,8 +68,9 @@ ipcMain.handle('file:open', async (e) => {
   const r = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: OPEN_FILTERS });
   if (r.canceled || r.filePaths.length === 0) return null;
   const filePath = r.filePaths[0];
+  // 大きすぎるファイルは読み込む前に断る（読み込んでから比べるとメモリーを使い切ることがある）
+  if ((await stat(filePath)).size > MAX_PRES_BYTES) throw new Error('ファイルが大きすぎます');
   const data = await readFile(filePath);
-  if (data.length > MAX_PRES_BYTES) throw new Error('ファイルが大きすぎます');
   approvedPaths.add(filePath);
   return { path: filePath, data: new Uint8Array(data.buffer, data.byteOffset, data.byteLength) };
 });
@@ -114,8 +115,8 @@ ipcMain.handle('image:open', async (e) => {
   const filePath = r.filePaths[0];
   const mime = IMAGE_MIME[path.extname(filePath).toLowerCase()];
   if (!mime) throw new Error('対応していない画像形式です');
+  if ((await stat(filePath)).size > MAX_IMAGE_BYTES) throw new Error('画像が大きすぎます（20MB まで）');
   const buf = await readFile(filePath);
-  if (buf.length > MAX_IMAGE_BYTES) throw new Error('画像が大きすぎます（20MB まで）');
   return { name: path.basename(filePath), dataUrl: `data:${mime};base64,${buf.toString('base64')}` };
 });
 

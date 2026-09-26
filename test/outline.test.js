@@ -130,3 +130,34 @@ test('ノートの変更をはさんだ入力は、アウトラインの入力�
   assert.equal(e.pres.slides[1].notes, 'メモ', 'ノートは残る');
   assert.equal(outlineLines(e.pres)[1].text, '目標1');
 });
+
+test('タイトルの先頭で Enter: 前に空のスライド（本文はこのスライドのまま）', () => {
+  const e = deck();
+  const r = e.outlineEdit((p) => splitLine(p, ref(p, 1), 0));
+  assert.deepEqual(view(e.pres), ['0:T:年間計画', '1:T:', '2:T:目標', '2:B0:売上', '2:B1:利益', '2:B0:新規顧客']);
+  assert.equal(r.slideId, e.pres.slides[2].id);
+  assert.equal(e.slideIndex, 2);
+});
+
+test('アウトラインのスライドの移動もセクションを守る', () => {
+  const e = deck();
+  e.newSlide('titleContent'); e.newSlide('titleContent');
+  const ids = e.pres.slides.map((s) => s.id);
+  e.gotoSlide(2); e.addSection('B'); // A=[0,1] B=[2,3]
+  moveLine(e.pres, { slideId: ids[2], kind: 'title', para: 0 }, -1);
+  assert.deepEqual(e.pres.slides.map((s) => s.id), ids, '境目では並びを変えずに前のセクションへ');
+  assert.deepEqual(e.pres.sections.map((s) => s.slideIds.length), [3, 1]);
+});
+
+test('履歴が上限でもアウトラインの続けての入力は 1 回にまとまる', () => {
+  const e = deck();
+  for (let i = 0; i < 210; i++) e.move(0, 0) || e.newSlide('blank');
+  const r = ref(e.pres, 1);
+  const before = e.undoStack.length;
+  e.outlineEdit((p) => (setLineText(p, r, '目標A') ? r : null), 'k');
+  e.outlineEdit((p) => (setLineText(p, r, '目標AB') ? r : null), 'k');
+  e.outlineEdit((p) => (setLineText(p, r, '目標ABC') ? r : null), 'k');
+  assert.equal(e.undoStack.length, Math.min(200, before + 1));
+  e.undo();
+  assert.equal(outlineLines(e.pres)[1].text, '目標');
+});

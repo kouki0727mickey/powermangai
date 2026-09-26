@@ -40,7 +40,7 @@ const $ = (id) => document.getElementById(id);
 const editor = new Editor(createPresentation(), { measure: measureText });
 const app = {
   filePath: null,
-  savedJson: JSON.stringify(editor.pres),
+  savedRevision: editor.revision,
   keytips: null, // KeyTipSession
   altPending: false,
   show: null, // { index, cover, digits }
@@ -86,7 +86,8 @@ function newPractice(mode, extra = {}) {
   };
 }
 
-const isDirty = () => JSON.stringify(editor.pres) !== app.savedJson;
+// 保存した後にプレゼンテーションを変えたか（全体を文字列にして比べると重いので、変更の回数で判定する）
+const isDirty = () => editor.revision !== app.savedRevision;
 
 // ------------------------------------------------------------------ 表示ユーティリティ
 let statusTimer = null;
@@ -758,7 +759,7 @@ async function confirmDiscard() {
   return openConfirm('確認', '保存されていない変更があります。破棄して続行しますか？');
 }
 
-function markSaved() { app.savedJson = JSON.stringify(editor.pres); renderTitle(); }
+function markSaved() { app.savedRevision = editor.revision; renderTitle(); }
 
 function loadPresentation(pres, filePath = null) {
   editor.load(pres);

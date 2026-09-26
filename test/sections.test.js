@@ -108,3 +108,15 @@ test('.pptx: セクションの往復（p14:sectionLst）', async () => {
   const idx = new Map(pres.slides.map((sl, i) => [sl.id, i]));
   assert.deepEqual(pres.sections.map((s) => [s.name, s.slideIds.map((id) => idx.get(id))]), [['既定のセクション', [0]], ['本題 & 詳細', [1, 2, 3]], ['', [4]]]);
 });
+
+test('セクションをまたいで複数のスライドを動かしても、動かしていないスライドのセクションは変わらない', () => {
+  const e = five();
+  e.gotoSlide(2); e.addSection('B');
+  // s1, s2（セクションの境目をまたぐ選択）を上へ
+  e.gotoSlide(1);
+  e.extendSlideSelection(1);
+  e.moveSlide(-1);
+  assert.equal(order(e), 's1,s2,s0,s3,s4');
+  assert.ok(e.pres.sections[0].slideIds.includes('s0'), 's0 は既定のセクションのまま');
+  assert.deepEqual(e.pres.sections[1].slideIds, ['s3', 's4']);
+});
