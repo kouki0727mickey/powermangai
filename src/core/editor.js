@@ -896,6 +896,7 @@ export class Editor {
     this.editingCell = null;
     if (JSON.stringify(this.pres) !== this.editPresBefore) {
       this.undoStack.push(this.editBefore);
+      this.outlineMergeKey = null;
       if (this.undoStack.length > HISTORY_LIMIT) this.undoStack.shift();
       this.redoStack = [];
     }
@@ -930,6 +931,7 @@ export class Editor {
     if (!this.notesBefore) return;
     if (JSON.stringify(this.pres) !== this.notesPresBefore) {
       this.undoStack.push(this.notesBefore);
+      this.outlineMergeKey = null;
       this.redoStack = [];
     }
     this.notesBefore = null;

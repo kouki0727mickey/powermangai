@@ -110,3 +110,23 @@ test('Alt+Shift+↑↓: 本文の段落の入れ替え、タイトルはスラ�
   moveLine(e.pres, ref(e.pres, 1), -1);
   assert.deepEqual(view(e.pres).map((x) => x.split(':').slice(0, 1).join() + x.split(':').slice(2).join()), ['0目標', '0売上', '0新規顧客', '0利益', '1年間計画']);
 });
+
+test('複数の段落のタイトルに本文をつなぐと、カーソルはつないだ位置', () => {
+  const e = deck();
+  const t = titleOf(e.pres.slides[1]);
+  t.paragraphs = [t.paragraphs[0], { ...t.paragraphs[0], runs: [{ text: 'B', font: { ...t.paragraphs[0].runs[0].font } }] }];
+  const r = joinWithPrevious(e.pres, ref(e.pres, 2));
+  assert.equal(outlineLines(e.pres)[1].text, `目標${SOFT_BREAK}B売上`);
+  assert.equal(r.caret, `目標${SOFT_BREAK}B`.length);
+});
+
+test('ノートの変更をはさんだ入力は、アウトラインの入力とまとめない', () => {
+  const e = deck();
+  const r = ref(e.pres, 1);
+  e.outlineEdit((p) => (setLineText(p, r, '目標1') ? r : null), 'k');
+  e.beginNotes(); e.previewNotes('メモ'); e.endNotes();
+  e.outlineEdit((p) => (setLineText(p, r, '目標12') ? r : null), 'k');
+  e.undo();
+  assert.equal(e.pres.slides[1].notes, 'メモ', 'ノートは残る');
+  assert.equal(outlineLines(e.pres)[1].text, '目標1');
+});

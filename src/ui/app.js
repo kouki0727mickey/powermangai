@@ -1115,7 +1115,8 @@ const ACTIONS = {
   },
   selectSection: () => {
     if (!editor.selectSection()) return needSection();
-    if (app.view !== 'sorter') editor.pane = 'slides';
+    // 標準表示ではスライド一覧へ（アウトライン表示・一覧表示ではそのまま）
+    if (app.view === 'normal') editor.pane = 'slides';
     render();
     return true;
   },

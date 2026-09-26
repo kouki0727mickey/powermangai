@@ -232,10 +232,11 @@ export function joinWithPrevious(pres, ref) {
     // 本文の最初の段落はタイトルの後ろにつなぐ
     const t = ensureTitle(pres, slide);
     const tp = t.paragraphs[t.paragraphs.length - 1];
-    const caret = t.paragraphs.length === 1 ? paraLength(tp) : null;
+    // カーソルはつないだ位置（タイトル全体の表示の長さ。複数の段落は ↵ で 1 行に表示している）
+    const caret = plainTitle(t).length;
     const [p] = takeParas(b, 0, 1);
     setParaText([tp], 0, shown(paraText(tp)) + shown(paraText(p)));
-    return { ref: { slideId: slide.id, kind: 'title', para: 0 }, caret: caret ?? plainTitle(t).length };
+    return { ref: { slideId: slide.id, kind: 'title', para: 0 }, caret };
   }
   if (si === 0) return null;
   const t = titleOf(slide), b = bodyOf(slide);
