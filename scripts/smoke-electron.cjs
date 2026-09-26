@@ -9,8 +9,19 @@ const { _electron } = require('playwright-core');
     : { args: ['.', '--no-sandbox'], cwd: require('path').resolve(__dirname, '..'), env: { ...process.env } });
   const win = await app.firstWindow();
   const errors = [];
+  const consoleLog = [];
   win.on('pageerror', (e) => errors.push(e.message));
-  await win.waitForFunction(() => globalThis.__pmg, null, { timeout: 15000 });
+  win.on('console', (m) => consoleLog.push(`[${m.type()}] ${m.text()}`));
+  // CI の初回起動は遅いことがあるので長めに待つ。起動できなければ原因がわかるよう状態を出してから失敗する
+  try {
+    await win.waitForFunction(() => globalThis.__pmg, null, { timeout: 60000 });
+  } catch (e) {
+    const state = await win.evaluate(() => ({ url: location.href, ready: document.readyState, title: document.title })).catch((x) => String(x));
+    console.error(JSON.stringify({ startupFailed: String(e.message).split('\n')[0], state, errors, console: consoleLog.slice(-30) }, null, 1));
+    await app.evaluate(({ BrowserWindow }) => { for (const w of BrowserWindow.getAllWindows()) w.pmgForceClose = true; }).catch(() => {});
+    await app.close().catch(() => {});
+    process.exit(1);
+  }
   const info = await win.evaluate(() => ({ api: typeof window.pmg?.openFile, slides: __pmg.editor.pres.slides.length, title: document.title }));
   await win.keyboard.press('Enter');
   await win.keyboard.press('Alt');
