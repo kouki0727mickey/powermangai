@@ -303,7 +303,7 @@ function renderOutline() {
   const keepCaret = outlineState.caret ?? (hadFocus ? outlineState.input.selectionStart : null);
   outlineEl.textContent = '';
   lines.forEach((l, k) => {
-    const row = h('div', { class: `ol-line ${l.kind}${k === i ? ' current' : ''}` });
+    const row = h('div', { class: `ol-line ${l.kind}${k === i ? ' current' : ''}`, 'data-slide': l.slideId, 'data-kind': l.kind, 'data-para': String(l.para) });
     if (l.kind === 'title') row.append(h('span', { class: 'ol-num', text: String(l.slideIndex + 1) }), h('span', { class: 'ol-icon' }));
     else {
       row.style.paddingLeft = `${34 + l.level * 18}px`;
@@ -2523,6 +2523,8 @@ stageEl.addEventListener('mousedown', (e) => {
 window.addEventListener('mousemove', (e) => {
   const d = app.drag;
   if (!d) { updateStageCursor(e); return; }
+  // ボタンを離したのを見逃した（ウィンドウの外で離したなど）ときは、そこで終える
+  if ((e.buttons & 1) === 0) { finishDrag(); return; }
   if (!d.started) {
     if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 3) return;
     d.started = true;
@@ -2560,9 +2562,13 @@ window.addEventListener('mousemove', (e) => {
   });
 });
 
-window.addEventListener('mouseup', (e) => {
+window.addEventListener('mouseup', (e) => { if (e.button === 0) finishDrag(); });
+// ウィンドウを離れたら（Alt+Tab など）ドラッグを終える
+window.addEventListener('blur', () => finishDrag());
+
+function finishDrag() {
   const d = app.drag;
-  if (!d || e.button !== 0) return;
+  if (!d) return;
   app.drag = null;
   if (d.mode === 'marquee') {
     if (d.started) {
@@ -2652,11 +2658,16 @@ $('sorter').addEventListener('dblclick', (e) => {
 outlineEl.addEventListener('mousedown', (e) => {
   const row = e.target.closest('.ol-line');
   if (!row || e.button !== 0) return;
+  // 行はスライド・種類・段落で覚える（編集の確定で描き直されても同じ行へ）
+  const ref = { slideId: row.dataset.slide, kind: row.dataset.kind, para: Number(row.dataset.para) };
+  const isCurrent = !!row.querySelector('input');
   // F6 で移るときと同じく、スライドの文字・ノートの編集を確定してから
   if (editor.pane !== 'outline') { commitEdit(); leaveNotes(); editor.pane = 'outline'; }
-  if (row.querySelector('input')) return; // 編集中の行はブラウザにまかせる（カーソルの位置）
+  if (isCurrent) return; // 編集中の行はブラウザにまかせる（カーソルの位置）
   e.preventDefault();
-  gotoOutlineLine([...outlineEl.querySelectorAll('.ol-line')].indexOf(row));
+  const lines = outlineLines(editor.pres, outlineState.ref);
+  const k = lineIndex(lines, ref);
+  gotoOutlineLine(k >= 0 ? k : Math.max(0, lines.findIndex((l) => l.slideId === ref.slideId)));
 });
 
 // ノート: クリックでノート欄へ
@@ -2700,12 +2711,17 @@ $('slideshow').addEventListener('mousedown', (e) => {
   handleShowKey({ key: 'ArrowRight', code: 'ArrowRight', preventDefault() {} });
 });
 // タッチパッドは細かいイベントが続けて来るので、ある程度たまってから、間隔をあけて 1 枚ずつ
-let wheelAcc = 0, wheelAt = 0;
+let wheelAcc = 0, wheelAt = 0, wheelLast = 0;
 $('slideshow').addEventListener('wheel', (e) => {
   if (!app.show || activeDialog()) return;
-  wheelAcc += e.deltaY;
   const now = performance.now();
-  if (Math.abs(wheelAcc) < 50 || now - wheelAt < 350) return;
+  // 切り替えた直後の続きのイベントは捨てる（1 回のスワイプで何枚も進まないように）
+  if (now - wheelAt < 350) { wheelAcc = 0; wheelAt = now; return; }
+  // しばらく間があいた前のスクロールの残りは持ち越さない
+  if (now - wheelLast > 500) wheelAcc = 0;
+  wheelLast = now;
+  wheelAcc += e.deltaY;
+  if (Math.abs(wheelAcc) < 50) return;
   const key = wheelAcc > 0 ? 'ArrowRight' : 'ArrowLeft';
   wheelAcc = 0;
   wheelAt = now;
