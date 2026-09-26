@@ -100,7 +100,7 @@ test('KeyTips: Alt,H,F,S でフォントサイズ', () => {
   const s = new KeyTipSession();
   assert.equal(s.press('h').type, 'node');
   assert.equal(s.press('F').type, 'pending');
-  assert.deepEqual(s.visibleTips().map((t) => t.key), ['FP', 'FF', 'FS', 'FG', 'FK', 'FC']);
+  assert.deepEqual(s.visibleTips().map((t) => t.key), ['FD', 'FP', 'FF', 'FS', 'FG', 'FK', 'FC']);
   const r = s.press('S');
   assert.equal(r.type, 'action');
   assert.equal(r.action, 'input:fontSize');

@@ -1,15 +1,17 @@
 // PowerPoint (Windows) に準拠したショートカット表。
 // contexts: editor = スライド編集領域, slides = スライド一覧(サムネイル), text = テキスト編集中, show = スライドショー
 const E = ['editor'];
-const ES = ['editor', 'slides'];
-const S = ['slides'];
+const ES = ['editor', 'slides', 'sorter'];
+const S = ['slides', 'sorter'];
+const ALL = ['editor', 'slides', 'sorter', 'text', 'notes'];
 
 export const BINDINGS = [
   // ファイル
   { action: 'newPresentation', keys: ['Ctrl+N'], contexts: ES, category: 'ファイル', label: '新しいプレゼンテーション' },
   { action: 'open', keys: ['Ctrl+O', 'Ctrl+F12'], contexts: ES, category: 'ファイル', label: '開く' },
-  { action: 'save', keys: ['Ctrl+S', 'Shift+F12'], contexts: [...ES, 'text'], category: 'ファイル', label: '上書き保存' },
-  { action: 'saveAs', keys: ['F12', 'Ctrl+Shift+S'], contexts: [...ES, 'text'], category: 'ファイル', label: '名前を付けて保存' },
+  { action: 'save', keys: ['Ctrl+S', 'Shift+F12'], contexts: ALL, category: 'ファイル', label: '上書き保存' },
+  { action: 'saveAs', keys: ['F12', 'Ctrl+Shift+S'], contexts: ALL, category: 'ファイル', label: '名前を付けて保存' },
+  { action: 'print', keys: ['Ctrl+P'], contexts: ALL, category: 'ファイル', label: '印刷 / PDF に出力' },
 
   // 共通編集
   { action: 'undo', keys: ['Ctrl+Z'], contexts: ES, category: '編集', label: '元に戻す' },
@@ -22,7 +24,9 @@ export const BINDINGS = [
   { action: 'selectAll', keys: ['Ctrl+A'], contexts: E, category: '選択', label: 'すべてのオブジェクトを選択' },
   { action: 'selectNext', keys: ['Tab'], contexts: E, category: '選択', label: '次のオブジェクトを選択' },
   { action: 'selectPrev', keys: ['Shift+Tab'], contexts: E, category: '選択', label: '前のオブジェクトを選択' },
-  { action: 'escape', keys: ['Escape'], contexts: ES, category: '選択', label: '選択解除' },
+  { action: 'escape', keys: ['Escape'], contexts: [...ES, 'notes'], category: '選択', label: '選択解除 / ノートから編集領域へ' },
+  { action: 'find', keys: ['Ctrl+F'], contexts: ALL, category: '編集', label: '検索' },
+  { action: 'replace', keys: ['Ctrl+H'], contexts: ALL, category: '編集', label: '置換' },
   { action: 'delete', keys: ['Delete', 'Backspace'], contexts: ES, category: '編集', label: '削除（オブジェクト / スライド）' },
 
   // テキスト編集
@@ -83,24 +87,30 @@ export const BINDINGS = [
   { action: 'sendToBack', keys: ['Ctrl+Shift+['], contexts: E, category: '図形', label: '最背面へ移動' },
 
   // スライド
-  { action: 'newSlide', keys: ['Ctrl+M'], contexts: [...ES, 'text'], category: 'スライド', label: '新しいスライド' },
+  { action: 'newSlide', keys: ['Ctrl+M'], contexts: ALL, category: 'スライド', label: '新しいスライド' },
   { action: 'nextSlide', keys: ['PageDown'], contexts: ES, category: 'スライド', label: '次のスライド' },
   { action: 'prevSlide', keys: ['PageUp'], contexts: ES, category: 'スライド', label: '前のスライド' },
-  { action: 'nextSlide', keys: ['ArrowDown', 'ArrowRight'], contexts: S, category: 'スライド', label: '次のスライド（一覧）' },
-  { action: 'prevSlide', keys: ['ArrowUp', 'ArrowLeft'], contexts: S, category: 'スライド', label: '前のスライド（一覧）' },
+  { action: 'nextSlide', keys: ['ArrowDown', 'ArrowRight'], contexts: ['slides'], category: 'スライド', label: '次のスライド（一覧）' },
+  { action: 'prevSlide', keys: ['ArrowUp', 'ArrowLeft'], contexts: ['slides'], category: 'スライド', label: '前のスライド（一覧）' },
+  { action: 'nextSlide', keys: ['ArrowRight'], contexts: ['sorter'], category: '表示', label: '次のスライド（スライド一覧表示）' },
+  { action: 'prevSlide', keys: ['ArrowLeft'], contexts: ['sorter'], category: '表示', label: '前のスライド（スライド一覧表示）' },
+  { action: 'sorterDown', keys: ['ArrowDown'], contexts: ['sorter'], category: '表示', label: '下の行のスライド（スライド一覧表示）' },
+  { action: 'sorterUp', keys: ['ArrowUp'], contexts: ['sorter'], category: '表示', label: '上の行のスライド（スライド一覧表示）' },
   { action: 'firstSlide', keys: ['Home'], contexts: S, category: 'スライド', label: '最初のスライド（一覧）' },
   { action: 'lastSlide', keys: ['End'], contexts: S, category: 'スライド', label: '最後のスライド（一覧）' },
   { action: 'moveSlideUp', keys: ['Ctrl+ArrowUp'], contexts: S, category: 'スライド', label: 'スライドを上へ移動' },
   { action: 'moveSlideDown', keys: ['Ctrl+ArrowDown'], contexts: S, category: 'スライド', label: 'スライドを下へ移動' },
   { action: 'moveSlideFirst', keys: ['Ctrl+Shift+ArrowUp'], contexts: S, category: 'スライド', label: 'スライドを先頭へ移動' },
   { action: 'moveSlideLast', keys: ['Ctrl+Shift+ArrowDown'], contexts: S, category: 'スライド', label: 'スライドを末尾へ移動' },
-  { action: 'focusEditor', keys: ['Enter'], contexts: S, category: 'スライド', label: '編集領域へ移動' },
-  { action: 'nextPane', keys: ['F6'], contexts: [...ES, 'text'], category: 'スライド', label: '次のウィンドウ枠へ移動' },
-  { action: 'prevPane', keys: ['Shift+F6'], contexts: [...ES, 'text'], category: 'スライド', label: '前のウィンドウ枠へ移動' },
+  { action: 'focusEditor', keys: ['Enter'], contexts: S, category: 'スライド', label: '編集領域へ移動（一覧表示は標準表示に戻る）' },
+  { action: 'nextPane', keys: ['F6'], contexts: ALL, category: 'スライド', label: '次のウィンドウ枠へ移動（一覧 → 編集 → ノート）' },
+  { action: 'prevPane', keys: ['Shift+F6'], contexts: ALL, category: 'スライド', label: '前のウィンドウ枠へ移動' },
+  { action: 'toggleGrid', keys: ['Shift+F9'], contexts: ALL, category: '表示', label: 'グリッド線の表示 / 非表示' },
+  { action: 'toggleGuides', keys: ['Alt+F9'], contexts: ALL, category: '表示', label: 'ガイドの表示 / 非表示' },
 
   // スライドショー
-  { action: 'showFromStart', keys: ['F5'], contexts: [...ES, 'text'], category: 'スライドショー', label: '最初から開始' },
-  { action: 'showFromCurrent', keys: ['Shift+F5'], contexts: [...ES, 'text'], category: 'スライドショー', label: '現在のスライドから開始' },
+  { action: 'showFromStart', keys: ['F5'], contexts: ALL, category: 'スライドショー', label: '最初から開始' },
+  { action: 'showFromCurrent', keys: ['Shift+F5'], contexts: ALL, category: 'スライドショー', label: '現在のスライドから開始' },
   { action: 'showNext', keys: ['ArrowRight', 'ArrowDown', 'PageDown', 'Space', 'N', 'Enter'], contexts: ['show'], category: 'スライドショー', label: '次へ' },
   { action: 'showPrev', keys: ['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace', 'P'], contexts: ['show'], category: 'スライドショー', label: '前へ' },
   { action: 'showFirst', keys: ['Home'], contexts: ['show'], category: 'スライドショー', label: '最初のスライド' },
@@ -110,10 +120,10 @@ export const BINDINGS = [
   { action: 'showEnd', keys: ['Escape', '-'], contexts: ['show'], category: 'スライドショー', label: 'スライドショーの終了' },
 
   // 練習モード（このアプリ独自）
-  { action: 'help', keys: ['F1', 'Ctrl+/'], contexts: [...ES, 'text'], category: '練習', label: 'ショートカット一覧' },
-  { action: 'score', keys: ['F9'], contexts: [...ES, 'text'], category: '練習', label: '採点する' },
-  { action: 'toggleTarget', keys: ['F11'], contexts: [...ES, 'text'], category: '練習', label: 'お手本の表示 / 非表示' },
-  { action: 'challengeList', keys: ['F8'], contexts: [...ES, 'text'], category: '練習', label: '課題を選ぶ' },
+  { action: 'help', keys: ['F1', 'Ctrl+/'], contexts: ALL, category: '練習', label: 'ショートカット一覧' },
+  { action: 'score', keys: ['F9'], contexts: ALL, category: '練習', label: '採点する' },
+  { action: 'toggleTarget', keys: ['F11'], contexts: ALL, category: '練習', label: 'お手本の表示 / 非表示' },
+  { action: 'challengeList', keys: ['F8'], contexts: ALL, category: '練習', label: '課題を選ぶ' },
 ];
 
 // 移動量（px）

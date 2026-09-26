@@ -652,3 +652,88 @@ export function openTablePicker() {
   render();
   return d.show();
 }
+
+// ---------------------------------------------------------------- 検索と置換
+/**
+ * api: { find(query, opts, dir) → 件数の文字列 | null, replace(query, repl, opts) → 文字列, replaceAll(query, repl, opts) → 文字列 }
+ * 右側に表示（スライドは暗くしない）。閉じると最後に見つかった箇所の編集に移る。
+ */
+export function openFindReplace(api, { replace = false, query = '' } = {}) {
+  const d = new Dialog(replace ? '置換' : '検索',
+    `Enter: 次を検索 ／ Shift+Enter: 前を検索${replace ? ' ／ Alt+R: 置換 ／ Alt+A: すべて置換' : ' ／ Ctrl+H: 置換へ'} ／ Alt+C: 大文字と小文字を区別 ／ Tab: 項目の移動 ／ Esc: 閉じる`,
+    { side: true });
+  const q = h('input', { type: 'text', id: 'fr-query', 'aria-label': '検索する文字列' });
+  q.value = query;
+  const r = h('input', { type: 'text', id: 'fr-repl', 'aria-label': '置換後の文字列' });
+  const mc = h('input', { type: 'checkbox', id: 'fr-case' });
+  const status = h('div', { role: 'status', style: { minHeight: '20px', marginTop: '8px', color: 'var(--muted)' } });
+  d.body.append(h('div', { class: 'form-row' }, h('label', { for: 'fr-query', text: '検索する文字列' })), q);
+  if (replace) d.body.append(h('div', { class: 'form-row' }, h('label', { for: 'fr-repl', text: '置換後の文字列' })), r);
+  d.body.append(h('div', { class: 'form-row' }, h('label', { for: 'fr-case', text: '大文字と小文字を区別する (C)' }), mc), status);
+  const fields = replace ? [q, r, mc] : [q, mc];
+  d.focus = () => { q.focus(); q.select(); };
+  const opts = () => ({ matchCase: mc.checked });
+  d.handleKey = (e) => {
+    if (e.isComposing) return false;
+    if (e.key === 'Escape') { d.close({ query: q.value }); return true; }
+    if (e.key === 'Tab') {
+      const i = fields.indexOf(document.activeElement);
+      fields[(i + (e.shiftKey ? -1 : 1) + fields.length) % fields.length].focus();
+      return true;
+    }
+    if (e.key === 'Enter') {
+      status.textContent = api.find(q.value, opts(), e.shiftKey ? -1 : 1) || '見つかりませんでした';
+      return true;
+    }
+    if (e.altKey && !e.ctrlKey) {
+      const k = e.code.replace(/^Key/, '').toLowerCase();
+      if (k === 'c') { mc.checked = !mc.checked; return true; }
+      if (replace && k === 'r') { status.textContent = api.replace(q.value, r.value, opts()); return true; }
+      if (replace && k === 'a') { status.textContent = api.replaceAll(q.value, r.value, opts()); return true; }
+      return true;
+    }
+    if (!replace && e.ctrlKey && e.key.toLowerCase() === 'h') { d.close({ query: q.value, switchToReplace: true }); return true; }
+    return false;
+  };
+  return d.show();
+}
+
+// ---------------------------------------------------------------- ヘッダーとフッター
+export function openHeaderFooter(hf) {
+  const d = new Dialog('ヘッダーとフッター', 'Tab: 項目の移動 ／ Space: チェック切り替え ／ Alt+文字: 項目へ移動 ／ Enter: すべてに適用 ／ Esc: キャンセル');
+  const cb = (id, label, checked, key) => {
+    const el = h('input', { type: 'checkbox', id });
+    el.checked = checked;
+    return [el, h('div', { class: 'form-row' }, h('label', { for: id, text: `${label} (${key})` }), el)];
+  };
+  const [date, dateRow] = cb('hf-date', '日付と時刻', hf.date, 'D');
+  const [num, numRow] = cb('hf-num', 'スライド番号', hf.slideNumber, 'N');
+  const [foot, footRow] = cb('hf-foot', 'フッター', hf.showFooter, 'F');
+  const text = h('input', { type: 'text', id: 'hf-text', 'aria-label': 'フッターの文字' });
+  text.value = hf.footer || '';
+  const [hide, hideRow] = cb('hf-hide', 'タイトル スライドに表示しない', hf.hideOnTitle, 'S');
+  d.body.append(dateRow, numRow, footRow, text, hideRow);
+  const fields = [date, num, foot, text, hide];
+  d.focus = () => date.focus();
+  d.handleKey = (e) => {
+    if (e.isComposing) return false;
+    if (e.key === 'Escape') { d.close(null); return true; }
+    if (e.key === 'Tab') {
+      const i = fields.indexOf(document.activeElement);
+      fields[(i + (e.shiftKey ? -1 : 1) + fields.length) % fields.length].focus();
+      return true;
+    }
+    if (e.altKey && !e.ctrlKey) {
+      const map = { d: date, n: num, f: foot, s: hide };
+      const t = map[e.code.replace(/^Key/, '').toLowerCase()];
+      if (t) { t.focus(); t.checked = !t.checked; }
+      return true;
+    }
+    if (e.key === 'Enter') {
+      d.close({ date: date.checked, slideNumber: num.checked, showFooter: foot.checked, footer: text.value, hideOnTitle: hide.checked });
+      return true;
+    }
+    return false;
+  };
+  return d.show();
+}

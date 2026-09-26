@@ -2,9 +2,10 @@
 import { Editor } from '../core/editor.js';
 import {
   SHAPE_TYPES, SHAPE_LABELS, LAYOUTS, createPresentation, createSlide, normalizePresentation, hasText, objFont, objText,
-  isLine, displayName, shapeStyles, LINE_WEIGHTS, createObject, allParas, hasTextContent,
+  isLine, displayName, shapeStyles, LINE_WEIGHTS, createObject, allParas, hasTextContent, SLIDE_SIZES,
 } from '../core/model.js';
-import { findTheme } from '../core/colors.js';
+import { findTheme, THEMES } from '../core/colors.js';
+import { findAll } from '../core/search.js';
 import { keyCandidates, findBinding, prettyKey, MODIFIER_KEYS } from '../core/keys.js';
 import { BINDINGS, MOVE_STEP, bindingsByCategory } from '../core/shortcuts.js';
 import { KeyTipSession, KEYTIPS, keyTipPaths } from '../core/keytips.js';
@@ -14,7 +15,7 @@ import { drawSlide, drawSelection, drawObject, slideToDataUrl, measureText, setI
 import { RichEditor } from './richeditor.js';
 import {
   activeDialog, openPalette, openShapeGallery, openGallery, openInput, openList, openConfirm,
-  openContent, openHelp, openFontDialog, openSelectionPane, openFormatShape, openTablePicker, h,
+  openContent, openHelp, openFontDialog, openSelectionPane, openFormatShape, openTablePicker, openFindReplace, openHeaderFooter, h,
 } from './dialogs.js';
 import { openPresentationFile, savePresentationFile, openImageFile, setFullScreen, readSystemClipboard, writeSystemClipboardText, imageSize } from './platform.js';
 import { tableLayout, CELL_INSET, cellDisplayFont } from '../core/table.js';
@@ -34,6 +35,13 @@ const app = {
   lastRepeat: null,
   practice: newPractice('free'),
   scale: 1,
+  view: 'normal', // 'normal' | 'sorter'
+  showNotes: true,
+  zoom: null, // null = ウィンドウに合わせる、数値 = %
+  grid: false,
+  guides: false,
+  findMatch: null,
+  findState: null,
 };
 
 function newPractice(mode, extra = {}) {
@@ -93,11 +101,16 @@ const rich = new RichEditor($('text-box'), $('text-editor'));
 rich.onChange = (paras) => editor.previewEdit(paras);
 
 function layout() {
+  $('center').hidden = app.view === 'sorter';
+  $('sorter').hidden = app.view !== 'sorter';
+  $('thumbs').hidden = app.view === 'sorter';
+  $('notes-pane').hidden = !app.showNotes;
   const stage = $('stage');
   const { width: SW, height: SH } = editor.size;
   const availW = stage.clientWidth - 32;
   const availH = stage.clientHeight - 32;
-  const scale = Math.max(0.1, Math.min(availW / SW, availH / SH));
+  // ズーム 100% = 実寸（1pt = 96/72 px）
+  const scale = app.zoom ? (app.zoom / 100) * (96 / 72) : Math.max(0.1, Math.min(availW / SW, availH / SH));
   app.scale = scale;
   const w = Math.round(SW * scale), hgt = Math.round(SH * scale);
   const dpr = window.devicePixelRatio || 1;
@@ -123,8 +136,11 @@ function render() {
   });
   const view = editor.editingCell ? editView() : null;
   drawSelection(overlay.getContext('2d'), slide, editor.selection, overlay.width, overlay.height, {
-    editingId: editor.editingId, size: editor.size, cellRect: view,
+    editingId: editor.editingId, size: editor.size, cellRect: view, grid: app.grid ? 28.35 : 0, guides: app.guides,
   });
+  if (app.view === 'sorter') renderSorter();
+  renderNotes();
+  scrollSelectionIntoView();
   renderThumbs();
   renderTextEditor();
   renderStatus();
@@ -148,6 +164,7 @@ function renderThumbs() {
   slides.forEach((s, i) => {
     const el = pane.children[i];
     el.classList.toggle('current', i === editor.slideIndex);
+    el.classList.toggle('hidden-slide', !!s.hidden);
     el.querySelector('.num').textContent = String(i + 1);
     const json = JSON.stringify(s) + editor.pres.theme + JSON.stringify(editor.pres.headerFooter) + i;
     if (thumbCache[i] !== json) {
@@ -161,6 +178,7 @@ function renderThumbs() {
   pane.children[editor.slideIndex]?.scrollIntoView({ block: 'nearest' });
   pane.classList.toggle('pane-focus', editor.pane === 'slides' && !editor.editingId);
   $('stage').classList.toggle('pane-focus', editor.pane === 'editor' || !!editor.editingId);
+  $('notes-pane').classList.toggle('pane-focus', editor.pane === 'notes');
 }
 
 /** 編集中の文字の領域（表ならセルを図形に見立てたもの） */
@@ -186,7 +204,88 @@ function renderTextEditor() {
 /** ダイアログやスライドショーが無いときは常に編集用要素にフォーカスを置く（IME の入力を受け取るため） */
 function focusSink() {
   if (activeDialog() || app.show) return;
-  if (document.activeElement !== rich.el) rich.el.focus({ preventScroll: true });
+  const target = editor.pane === 'notes' ? notesEl : rich.el;
+  if (document.activeElement !== target) target.focus({ preventScroll: true });
+}
+
+// ---------------------------------------------------------------- ノート・スライド一覧表示
+const notesEl = $('notes');
+notesEl.addEventListener('input', () => editor.previewNotes(notesEl.value));
+
+function renderNotes() {
+  if (editor.pane !== 'notes' && notesEl.value !== editor.slide.notes) notesEl.value = editor.slide.notes;
+}
+
+function enterNotes() {
+  if (!app.showNotes) { app.showNotes = true; layout(); }
+  editor.pane = 'notes';
+  editor.beginNotes();
+  notesEl.value = editor.slide.notes;
+  render();
+  focusSink();
+  notesEl.setSelectionRange(notesEl.value.length, notesEl.value.length);
+}
+
+function leaveNotes() {
+  if (editor.pane !== 'notes') return;
+  editor.endNotes();
+  editor.pane = 'editor';
+}
+
+let sorterCache = [];
+function sorterColumns() {
+  const el = $('sorter');
+  return Math.max(1, Math.floor((el.clientWidth - 32 + 18) / (240 + 18)));
+}
+
+function renderSorter() {
+  const el = $('sorter');
+  const slides = editor.pres.slides;
+  const dpr = window.devicePixelRatio || 1;
+  const H = Math.round((240 * editor.pres.height) / editor.pres.width);
+  while (el.children.length > slides.length) el.lastChild.remove();
+  while (el.children.length < slides.length) {
+    const c = document.createElement('canvas');
+    el.append(h('div', { class: 'sorter-item' }, c, h('span', { class: 'num' })));
+  }
+  sorterCache.length = slides.length;
+  slides.forEach((s, i) => {
+    const item = el.children[i];
+    item.classList.toggle('current', i === editor.slideIndex);
+    item.classList.toggle('hidden-slide', !!s.hidden);
+    item.querySelector('.num').textContent = String(i + 1);
+    const c = item.querySelector('canvas');
+    const key = JSON.stringify(s) + editor.pres.theme + H + i;
+    if (sorterCache[i] !== key) {
+      c.width = Math.round(240 * dpr); c.height = Math.round(H * dpr);
+      c.style.width = '240px'; c.style.height = `${H}px`;
+      drawSlide(c.getContext('2d'), s, c.width, c.height, { pres: editor.pres, index: i });
+      sorterCache[i] = key;
+    }
+  });
+  el.children[editor.slideIndex]?.scrollIntoView({ block: 'nearest' });
+}
+
+function setView(view) {
+  commitEdit();
+  leaveNotes();
+  app.view = view;
+  editor.pane = view === 'sorter' ? 'sorter' : 'editor';
+  editor.selection = [];
+  layout();
+}
+
+/** ズーム中は選択した図形が見えるようにスクロール */
+function scrollSelectionIntoView() {
+  if (!app.zoom || !editor.selection.length) return;
+  const o = editor.selectedObjects()[0];
+  const stage = $('stage');
+  const wrap = $('canvas-wrap');
+  const s = app.scale;
+  const left = wrap.offsetLeft + o.x * s, top = wrap.offsetTop + o.y * s;
+  const right = left + o.w * s, bottom = top + o.h * s;
+  if (left < stage.scrollLeft || right > stage.scrollLeft + stage.clientWidth) stage.scrollLeft = left - 40;
+  if (top < stage.scrollTop || bottom > stage.scrollTop + stage.clientHeight) stage.scrollTop = top - 40;
 }
 
 // 図形を選択した状態で IME の変換を始めたら、その図形の文字を置き換えて編集を始める
@@ -211,12 +310,14 @@ rich.el.addEventListener('input', () => {
 
 function renderStatus() {
   $('status-slide').textContent = `スライド ${editor.slideIndex + 1} / ${editor.pres.slides.length}`;
-  $('status-pane').textContent = editor.editingId ? 'テキスト編集中（Esc で終了）' : editor.pane === 'slides' ? 'スライド一覧（F6 で編集領域へ）' : '編集領域';
+  $('status-pane').textContent = editor.editingId ? 'テキスト編集中（Esc で終了）'
+    : { slides: 'スライド一覧（F6 で編集領域へ）', notes: 'ノート（Esc で編集領域へ）', sorter: 'スライド一覧表示（Enter で標準表示）' }[editor.pane] || '編集領域';
   const sel = editor.selectedObjects();
   let selText = '選択なし（Tab で選択）';
   if (sel.length === 1) selText = `選択: ${displayName(sel[0], editor.slide)}`;
   else if (sel.length > 1) selText = `選択: ${sel.length} 個${sel.every((o) => o.groupId && o.groupId === sel[0].groupId) ? '（グループ）' : ''}`;
   $('status-selection').textContent = selText;
+  $('status-view').textContent = `${editor.slide.hidden ? '非表示スライド ／ ' : ''}${app.view === 'sorter' ? 'スライド一覧 ／ ' : ''}ズーム ${app.zoom ? `${app.zoom}%` : 'ウィンドウに合わせる'}${app.grid ? ' ／ グリッド' : ''}${app.guides ? ' ／ ガイド' : ''}`;
 }
 
 function renderTitle() {
@@ -305,12 +406,18 @@ function commitEdit() {
   editor.endEdit(paras ?? undefined);
 }
 
-/** カーソルの画面上の縦位置（行の判定用） */
-function caretTop() {
-  const sel = window.getSelection();
-  if (!sel.rangeCount) return null;
-  const range = sel.getRangeAt(0).cloneRange();
-  range.collapse(false);
+/** カーソル（または [node, offset] の位置）の画面上の縦位置（行の判定用） */
+function caretTop(at) {
+  let range;
+  if (at) {
+    range = document.createRange();
+    range.setStart(at[0], at[1]);
+  } else {
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return null;
+    range = sel.getRangeAt(0).cloneRange();
+    range.collapse(false);
+  }
   const rect = range.getClientRects()[0] || range.getBoundingClientRect();
   if (rect && rect.height) return rect.top;
   // 空の段落などでは矩形が取れないので、段落要素の位置を使う
@@ -387,7 +494,10 @@ function markSaved() { app.savedJson = JSON.stringify(editor.pres); renderTitle(
 
 function loadPresentation(pres, filePath = null) {
   editor.load(pres);
+  app.view = 'normal';
   editor.pane = 'editor';
+  sorterCache = [];
+  layout();
   app.filePath = filePath;
   thumbCache = [];
   markSaved();
@@ -435,6 +545,8 @@ const ACTIONS = {
     return true;
   },
   paste: async () => {
+    // スライドの貼り付けはすぐに行う（直後のキー操作と順序が入れ替わらないように）
+    if (editor.slidePane && editor.clipboard?.kind === 'slides') return editor.paste();
     // アプリ内でコピーした後に他のアプリで新しくコピーしていれば、そちらを貼り付ける
     const sys = await readSystemClipboard();
     const newerOutside = !editor.clipboard || clipboardSignature(sys) !== app.clipSig;
@@ -449,11 +561,13 @@ const ACTIONS = {
   selectNext: () => editor.selectNext(1),
   selectPrev: () => editor.selectNext(-1),
   escape: () => {
+    if (editor.pane === 'notes') { leaveNotes(); render(); return; }
     if (editor.pane === 'slides') { editor.pane = 'editor'; render(); return; }
+    if (editor.pane === 'sorter') return;
     editor.clearSelection();
   },
   delete: () => {
-    if (editor.pane === 'slides') return editor.deleteSlide();
+    if (editor.slidePane) return editor.deleteSlide();
     return editor.deleteSelection() || needSelection();
   },
 
@@ -562,9 +676,11 @@ const ACTIONS = {
   moveSlideDown: () => editor.moveSlide(1),
   moveSlideFirst: () => editor.moveSlide(-editor.slideIndex),
   moveSlideLast: () => editor.moveSlide(editor.pres.slides.length - 1 - editor.slideIndex),
-  focusEditor: () => { editor.pane = 'editor'; render(); },
-  nextPane: () => togglePane(),
-  prevPane: () => togglePane(),
+  focusEditor: () => { if (app.view === 'sorter') setView('normal'); else { editor.pane = 'editor'; render(); } },
+  nextPane: () => togglePane(1),
+  prevPane: () => togglePane(-1),
+  sorterDown: () => editor.gotoSlide(Math.min(editor.pres.slides.length - 1, editor.slideIndex + sorterColumns())),
+  sorterUp: () => editor.gotoSlide(Math.max(0, editor.slideIndex - sorterColumns())),
 
   // スライドショー
   showFromStart: () => startShow(0),
@@ -579,14 +695,7 @@ const ACTIONS = {
     setStatus(`${SHAPE_LABELS[type]}を挿入しました`);
   },
   'gallery:layout': async () => {
-    const items = LAYOUTS.map(({ id: value, label }) => {
-      const c = document.createElement('canvas');
-      c.width = 80; c.height = Math.round((80 * editor.pres.height) / editor.pres.width);
-      c.style.border = '1px solid #ccc';
-      drawSlide(c.getContext('2d'), createSlide(value, editor.size), c.width, c.height, { pres: editor.pres, showPlaceholder: true });
-      return { label, value, icon: c };
-    });
-    const layout = await openGallery('新しいスライド', items, { columns: 3 });
+    const layout = await chooseLayout('新しいスライド');
     if (layout) { commitEdit(); editor.newSlide(layout); }
   },
   'palette:fill': sel(async () => {
@@ -710,6 +819,67 @@ const ACTIONS = {
     else if (v === 'text') pasteTextAsBox(sys.text);
     return true;
   },
+  // 表示
+  viewNormal: () => setView('normal'),
+  viewSorter: () => setView('sorter'),
+  readingView: () => startShow(editor.slideIndex, { windowed: true }),
+  toggleNotes: () => {
+    if (app.showNotes && editor.pane === 'notes') leaveNotes();
+    app.showNotes = !app.showNotes;
+    layout();
+    setStatus(app.showNotes ? 'ノート欄を表示しました（F6 で移動）' : 'ノート欄を非表示にしました');
+  },
+  zoom: async () => {
+    const levels = [400, 300, 200, 150, 100, 75, 66, 50, 33];
+    const v = await openList('ズーム', [{ label: 'ウィンドウに合わせる', value: 'fit' }, ...levels.map((z) => ({ label: `${z}%`, value: z }))], { initial: app.zoom ? levels.indexOf(app.zoom) + 1 : 0 });
+    if (!v) return;
+    app.zoom = v === 'fit' ? null : v;
+    layout();
+  },
+  zoomFit: () => { app.zoom = null; layout(); },
+  toggleGrid: () => { app.grid = !app.grid; render(); },
+  toggleGuides: () => { app.guides = !app.guides; render(); },
+  hideSlide: () => setStatus(editor.toggleSlideHidden() ? `スライド ${editor.slideIndex + 1} を非表示スライドにしました（スライドショーで表示されません）` : '非表示を解除しました'),
+
+  // デザイン
+  'gallery:themes': async () => {
+    const items = THEMES.map((th) => {
+      const c = document.createElement('canvas');
+      c.width = 128; c.height = 72;
+      const sample = createSlide('blank');
+      sample.objects.push(
+        createObject('text', { x: 40, y: 150, w: 880, h: 200, text: 'Aa', font: { size: 150, family: '+major' } }),
+        ...['@accent1', '@accent2', '@accent3', '@accent4', '@accent5', '@accent6'].map((col, i) => createObject('rect', { x: 40 + i * 150, y: 420, w: 140, h: 60, fill: col, stroke: null })),
+      );
+      drawSlide(c.getContext('2d'), sample, 128, 72, { pres: { ...editor.pres, theme: th.id, headerFooter: {} } });
+      return { label: th.name, value: th.id, icon: c };
+    });
+    const v = await openGallery('テーマ', items, { columns: 4 });
+    if (v) { editor.setTheme(v); thumbCache = []; }
+  },
+  'gallery:slideSize': async () => {
+    const v = await openList('スライドのサイズ', SLIDE_SIZES.map((sz) => ({ label: sz.label, value: sz })), { initial: SLIDE_SIZES.findIndex((sz) => sz.width === editor.pres.width) });
+    if (v && editor.setSlideSize(v)) { thumbCache = []; sorterCache = []; setStatus(`スライドのサイズを ${v.label} にしました`); }
+  },
+  'palette:background': async () => {
+    const r = await openPalette('背景の色（N: テーマの背景に戻す）', { current: editor.slide.background || '@bg1', theme: editor.theme });
+    if (!r) return;
+    const where = await openList('背景の適用先', [{ label: 'このスライド', value: 'one' }, { label: 'すべてに適用', value: 'all' }]);
+    if (where) editor.setBackground(r.color, where === 'all');
+  },
+  'gallery:changeLayout': async () => {
+    const layout = await chooseLayout('レイアウト');
+    if (layout) editor.changeLayout(layout);
+  },
+  headerFooter: async () => {
+    const r = await openHeaderFooter(editor.pres.headerFooter);
+    if (r) editor.setHeaderFooter(r);
+  },
+
+  // 検索・置換
+  find: () => findReplace(false),
+  replace: () => findReplace(true),
+
   selectionPane: async () => {
     commitEdit();
     editor.pane = 'editor';
@@ -760,6 +930,12 @@ const ACTIONS = {
   loadTargetImage: () => loadTargetImage(),
 };
 
+// ノート欄にいるまま実行できる操作
+const NOTES_KEEP = new Set([
+  'save', 'saveAs', 'print', 'help', 'score', 'toggleTarget', 'toggleHints', 'challengeList', 'nextPane', 'prevPane', 'escape',
+  'showFromStart', 'showFromCurrent', 'toggleGrid', 'toggleGuides', 'zoom', 'zoomFit',
+]);
+
 // 繰り返し（F4）の対象にする操作
 const REPEATABLE = new Set([
   'duplicate', 'paste', 'bold', 'italic', 'underline', 'fontGrow', 'fontShrink', 'moveUp', 'moveDown', 'moveLeft', 'moveRight',
@@ -778,6 +954,7 @@ async function rememberClipboard() {
   const text = clip && clip.kind === 'objects' ? clip.items.filter(hasTextContent).map((o) => allParas(o).map((p) => p.runs.map((r) => r.text).join('')).join('\n')).filter(Boolean).join('\n') : '';
   await writeSystemClipboardText(text);
   app.clipSig = clipboardSignature(await readSystemClipboard());
+  app.clipSeq = (app.clipSeq || 0) + 1;
 }
 
 async function insertPictureFromDataUrl(dataUrl) {
@@ -798,6 +975,68 @@ function pasteTextAsBox(text) {
   const t = editor.insertObject('text', { text: text.replace(/\r\n?/g, '\n'), w: Math.min(editor.pres.width - 80, 600) });
   editor.setSelection([t.id]);
   return true;
+}
+
+function chooseLayout(title) {
+  const items = LAYOUTS.map(({ id: value, label }) => {
+    const c = document.createElement('canvas');
+    c.width = 80; c.height = Math.round((80 * editor.pres.height) / editor.pres.width);
+    c.style.border = '1px solid #ccc';
+    drawSlide(c.getContext('2d'), createSlide(value, editor.size), c.width, c.height, { pres: { ...editor.pres, headerFooter: {} }, showPlaceholder: true });
+    return { label, value, icon: c };
+  });
+  return openGallery(title, items, { columns: 3 });
+}
+
+/** 検索 / 置換。ダイアログを閉じると、最後に見つかった文字を選択した状態で編集に移る */
+async function findReplace(replace) {
+  commitEdit();
+  leaveNotes();
+  if (app.view === 'sorter') setView('normal');
+  const find = (query, opts, dir) => {
+    const matches = findAll(editor.pres, query, opts);
+    if (!matches.length) { app.findMatch = null; return null; }
+    const st = app.findState;
+    let index;
+    if (!st || st.query !== query || st.matchCase !== opts.matchCase) {
+      // 現在のスライド以降で最初の一致から
+      index = matches.findIndex((m) => m.slide >= editor.slideIndex);
+      if (index === -1) index = 0;
+      if (dir < 0) index = (index - 1 + matches.length) % matches.length;
+    } else {
+      index = (st.index + dir + matches.length) % matches.length;
+    }
+    app.findState = { query, matchCase: opts.matchCase, index };
+    const m = matches[index];
+    app.findMatch = m;
+    editor.gotoSlide(m.slide);
+    editor.setSelection([m.objId]);
+    return `${index + 1} / ${matches.length} 件目（スライド ${m.slide + 1}：${displayName(editor.findObject(m.objId), editor.slide)}）`;
+  };
+  const r = await openFindReplace({
+    find,
+    replace: (query, repl, opts) => {
+      const m = app.findMatch;
+      if (m && findAll(editor.pres, query, opts).some((x) => JSON.stringify(x) === JSON.stringify(m))) {
+        editor.replaceOne(m, repl);
+        app.findState = { ...app.findState, index: app.findState.index - 1 };
+      }
+      return find(query, opts, 1) || '置換しました。これ以上見つかりません';
+    },
+    replaceAll: (query, repl, opts) => {
+      const n = query ? editor.replaceAll(query, repl, opts) : 0;
+      app.findMatch = null;
+      return n ? `${n} 個の項目を置換しました` : '見つかりませんでした';
+    },
+  }, { replace, query: app.findState?.query || '' });
+  if (r?.switchToReplace) { findReplace(true); return; }
+  // 見つかった文字を選択して編集に移る（そのまま入力すると置き換えられる）
+  const m = app.findMatch;
+  if (m && editor.findObject(m.objId) && editor.slideIndex === m.slide) {
+    editor.setSelection([m.objId]);
+    if (beginEdit({ cell: m.cell || undefined })) rich.setSel(m.from, m.to);
+  }
+  app.findMatch = null;
 }
 
 async function inputFontSize() {
@@ -829,10 +1068,17 @@ async function inputDimension(prop, label) {
   if (v !== null) editor.setDimension(prop, Number(v));
 }
 
-function togglePane() {
+/** F6 / Shift+F6: スライド一覧 → 編集領域 → ノート → … */
+function togglePane(dir = 1) {
+  if (app.view === 'sorter') return;
   commitEdit();
-  editor.pane = editor.pane === 'slides' ? 'editor' : 'slides';
-  if (editor.pane === 'slides') editor.selection = [];
+  const order = ['slides', 'editor', ...(app.showNotes ? ['notes'] : [])];
+  const i = Math.max(0, order.indexOf(editor.pane));
+  const next = order[(i + dir + order.length) % order.length];
+  leaveNotes();
+  if (next === 'notes') { enterNotes(); return; }
+  editor.pane = next;
+  if (next === 'slides') editor.selection = [];
   render();
 }
 
@@ -853,6 +1099,8 @@ async function save(saveAs) {
 async function runAction(action, args, { keys = '', label = '', repeat = false } = {}) {
   const fn = ACTIONS[action];
   if (!fn) { setStatus(`未対応の操作です: ${action}`); return false; }
+  // ノート欄で使えない操作（図形の挿入など）は編集領域に戻ってから実行
+  if (editor.pane === 'notes' && !NOTES_KEEP.has(action)) { leaveNotes(); render(); }
   // 表のセルを編集中だった場合、そのセルを行・列の操作の基準にする
   app.actionCell = editor.editingCell ? { id: editor.editingId, ...editor.editingCell } : null;
   if (editor.editingId && !TEXT_KEEP.has(action)) commitEdit();
@@ -917,20 +1165,32 @@ function handleKeytipKey(e) {
 // ------------------------------------------------------------------ スライドショー
 const showCanvas = $('show-canvas');
 
-function startShow(from) {
+/** 非表示スライドを飛ばして、index から dir 方向で最初に表示するスライド（なければ範囲外） */
+function visibleSlide(index, dir) {
+  const slides = editor.pres.slides;
+  let i = index;
+  while (i >= 0 && i < slides.length && slides[i].hidden) i += dir;
+  return i;
+}
+
+function startShow(from, { windowed = false } = {}) {
   commitEdit();
-  app.show = { index: from, cover: '', digits: '' };
+  leaveNotes();
+  // 最初からのときは非表示スライドを飛ばす（現在のスライドからのときは、そのスライドを表示）
+  const index = from === 0 ? visibleSlide(0, 1) : from;
+  app.show = { index, cover: '', digits: '', windowed };
   $('slideshow').hidden = false;
-  setFullScreen(true);
+  if (!windowed) setFullScreen(true);
   renderShow();
   // 全画面切り替え後のサイズで描き直す
   setTimeout(renderShow, 300);
 }
 
 function endShow() {
+  const windowed = app.show?.windowed;
   app.show = null;
   $('slideshow').hidden = true;
-  setFullScreen(false);
+  if (!windowed) setFullScreen(false);
   render();
   focusSink();
 }
@@ -981,14 +1241,16 @@ function handleShowKey(e) {
     case 'showNext':
       if (s.cover) { s.cover = ''; break; }
       if (s.index > last) { endShow(); return; }
-      s.index += 1;
+      s.index = Math.min(last + 1, visibleSlide(s.index + 1, 1));
       break;
-    case 'showPrev':
+    case 'showPrev': {
       if (s.cover) { s.cover = ''; break; }
-      s.index = Math.max(0, Math.min(s.index, last + 1) - 1);
+      const prev = visibleSlide(Math.min(s.index, last + 1) - 1, -1);
+      if (prev >= 0) s.index = prev;
       break;
-    case 'showFirst': s.index = 0; s.cover = ''; break;
-    case 'showLast': s.index = last; s.cover = ''; break;
+    }
+    case 'showFirst': s.index = Math.max(0, visibleSlide(0, 1)); s.cover = ''; break;
+    case 'showLast': { const v = visibleSlide(last, -1); s.index = v >= 0 ? v : last; s.cover = ''; break; }
     case 'showBlack': s.cover = s.cover === 'black' ? '' : 'black'; break;
     case 'showWhite': s.cover = s.cover === 'white' ? '' : 'white'; break;
     case 'showEnd': endShow(); return;
@@ -1197,6 +1459,15 @@ function onKeyDown(e) {
     return;
   }
 
+  if (ctx === 'notes') {
+    // ノート欄: 文字入力はそのまま。Tab はフォーカス移動ではなくタブ文字
+    if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      e.preventDefault();
+      if (!e.shiftKey) { notesEl.setRangeText('\t', notesEl.selectionStart, notesEl.selectionEnd, 'end'); editor.previewNotes(notesEl.value); }
+    }
+    return;
+  }
+
   if (ctx === 'text') {
     if (!rich.active || e.ctrlKey || e.metaKey || e.altKey) return; // その他はブラウザの編集操作（単語単位の移動など）に任せる
     // 段落の分割・結合やレベル変更はモデルで処理する（PowerPoint と同じ動作）
@@ -1204,16 +1475,13 @@ function onKeyDown(e) {
       // 表: Tab / Shift+Tab でセルを移動。↑ / ↓ は先頭 / 末尾の段落にいるとき上下のセルへ
       if (e.key === 'Tab') { e.preventDefault(); moveCell(0, e.shiftKey ? -1 : 1); return; }
       if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey) {
-        // まずブラウザにカーソルを動かさせ、動かなかった（最初 / 最後の行だった）ときだけ上下のセルへ移る
-        // （同じ行の先頭 / 末尾へ移動するだけの場合もあるので、位置ではなく行の高さで判断する）
-        const before = caretTop();
-        const cell = editor.editingCell;
-        const dir = e.key === 'ArrowUp' ? -1 : 1;
-        setTimeout(() => {
-          if (!rich.active || editor.editingCell !== cell) return;
-          const after = caretTop();
-          if (before === null || after === null || Math.abs(after - before) < 2) moveCell(dir, 0);
-        }, 0);
+        // カーソルがセルの最初（最後）の行にあるときだけ上下のセルへ移る。それ以外はセル内で行を移動
+        rich.sync();
+        const up = e.key === 'ArrowUp';
+        const edge = up ? { p: 0, o: 0 } : { p: rich.paras.length - 1, o: rich.paras[rich.paras.length - 1].runs.reduce((n, r) => n + r.text.length, 0) };
+        const cur = caretTop();
+        const edgeTop = caretTop(rich.posToDom(edge));
+        if (cur === null || edgeTop === null || Math.abs(cur - edgeTop) < 2) { e.preventDefault(); moveCell(up ? -1 : 1, 0); }
         return;
       }
     }

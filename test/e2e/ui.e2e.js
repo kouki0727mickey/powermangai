@@ -129,6 +129,8 @@ test('Ctrl+M / F6 / スライド一覧で Ctrl+↑ 並べ替え / Delete', async
   await keys('Control+m', 'Control+m');
   assert.equal(await ed(() => __pmg.editor.pres.slides.length), 3);
   await keys('F6');
+  assert.equal(await ed(() => __pmg.editor.pane), 'notes', '編集領域の次はノート');
+  await keys('F6');
   assert.equal(await ed(() => __pmg.editor.pane), 'slides');
   const id = await ed(() => __pmg.editor.slide.id);
   await keys('Control+ArrowUp');
@@ -664,12 +666,12 @@ test('アプリ内でコピーした後に他のアプリでコピーしたも�
   await fresh();
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await keys('Tab', 'Control+c');
-  await page.waitForFunction(() => __pmg.app.clipSig !== undefined);
+  await page.waitForFunction(() => __pmg.app.clipSeq === 1);
   await ed(() => navigator.clipboard.writeText('あとからコピー'));
   await keys('Control+v');
   await page.waitForFunction(() => __pmg.editor.selectedObjects()[0]?.type === 'text' && __pmg.text(__pmg.editor.selectedObjects()[0]) === 'あとからコピー');
   await keys('Tab', 'Control+c');
-  await page.waitForFunction(() => __pmg.app.clipSig && !__pmg.app.clipSig.startsWith('あとから'));
+  await page.waitForFunction(() => __pmg.app.clipSeq === 2);
   const n = await ed(() => __pmg.editor.slide.objects.length);
   await keys('Control+v');
   await page.waitForFunction((k) => __pmg.editor.slide.objects.length === k + 1, n);
@@ -682,4 +684,136 @@ test('表を選択して Ctrl+T でフォント ダイアログが開く', async
   await page.waitForSelector('#fd-size');
   assert.equal(await page.inputValue('#fd-size'), '18');
   await keys('Escape');
+});
+
+// ---------------------------------------------------------------- 表示・デザイン
+test('ノート: F6 でノート欄へ移動して入力、Esc で戻り、Ctrl+Z で入力全体を戻す', async () => {
+  await fresh();
+  await keys('F6');
+  assert.equal(await ed(() => document.activeElement.id), 'notes');
+  await page.keyboard.type('話す内容');
+  await keys('Tab');
+  await page.keyboard.type('2');
+  await keys('Escape');
+  assert.equal(await ed(() => __pmg.editor.slide.notes), '話す内容\t2');
+  assert.equal(await ed(() => __pmg.editor.pane), 'editor');
+  await keys('Control+z');
+  assert.equal(await ed(() => __pmg.editor.slide.notes), '');
+  await alt('w', 'n'); // ノート欄を隠す
+  assert.equal(await page.isVisible('#notes-pane'), false);
+  await keys('F6');
+  assert.equal(await ed(() => __pmg.editor.pane), 'slides', 'ノート欄が隠れていれば一覧 ↔ 編集');
+  await keys('F6');
+  assert.equal(await ed(() => __pmg.editor.pane), 'editor');
+});
+
+test('スライド一覧表示（Alt → W → I）: 矢印で移動、Ctrl+X / Ctrl+V、Enter で標準表示', async () => {
+  await fresh();
+  await keys('Control+m', 'Control+m', 'Control+m');
+  await alt('w', 'i');
+  assert.equal(await page.isVisible('#sorter'), true);
+  assert.equal(await page.$$eval('.sorter-item', (els) => els.length), 4);
+  await keys('ArrowLeft', 'ArrowLeft');
+  assert.equal(await ed(() => __pmg.editor.slideIndex), 1);
+  await keys('Home');
+  assert.equal(await ed(() => __pmg.editor.slideIndex), 0);
+  const firstId = await ed(() => __pmg.editor.slide.id);
+  await keys('Control+x', 'ArrowRight', 'ArrowRight', 'Control+v');
+  assert.equal(await ed(() => __pmg.editor.pres.slides[3].layout), 'title');
+  assert.notEqual(await ed(() => __pmg.editor.pres.slides[3].id), firstId);
+  await keys('Enter');
+  assert.equal(await page.isVisible('#stage'), true);
+  assert.equal(await ed(() => __pmg.editor.pane), 'editor');
+});
+
+test('非表示スライド（Alt → S → H）はスライドショーで飛ばされる', async () => {
+  await fresh();
+  await keys('Control+m', 'Control+m');
+  await keys('PageUp');
+  await alt('s', 'h');
+  assert.equal(await ed(() => __pmg.editor.pres.slides[1].hidden), true);
+  await keys('F5', 'ArrowRight');
+  assert.equal(await ed(() => __pmg.app.show.index), 2);
+  await keys('ArrowLeft');
+  assert.equal(await ed(() => __pmg.app.show.index), 0);
+  await keys('Escape');
+});
+
+test('ズーム（Alt → W → Q）・グリッド（Shift+F9）・ガイド（Alt+F9）', async () => {
+  await fresh();
+  await alt('w', 'q');
+  await keys('ArrowDown', 'ArrowDown', 'ArrowDown', 'Enter'); // 200%
+  assert.equal(await ed(() => __pmg.app.zoom), 200);
+  assert.equal(await ed(() => Math.round(document.getElementById('canvas-wrap').offsetWidth)), 2560);
+  await keys('Shift+F9', 'Alt+F9');
+  assert.deepEqual(await ed(() => [__pmg.app.grid, __pmg.app.guides]), [true, true]);
+  await alt('w', 'f', 'w');
+  assert.equal(await ed(() => __pmg.app.zoom), null);
+});
+
+test('検索（Ctrl+F）: Enter で次を検索し、Esc で見つかった文字を選択して編集', async () => {
+  await fresh();
+  await ed(() => { const e = __pmg.editor; e.setText(e.slide.objects[0].id, 'りんご と みかん'); e.newSlide(); e.setText(e.slide.objects[0].id, 'みかん箱'); e.gotoSlide(0); });
+  await keys('Control+f');
+  await page.keyboard.type('みかん');
+  await keys('Enter');
+  assert.match(await page.textContent('.dialog [role=status]'), /1 \/ 2 件目（スライド 1/);
+  await keys('Enter');
+  assert.match(await page.textContent('.dialog [role=status]'), /2 \/ 2 件目（スライド 2/);
+  assert.equal(await ed(() => __pmg.editor.slideIndex), 1);
+  await keys('Escape');
+  assert.equal(await ed(() => getSelection().toString()), 'みかん');
+  await page.keyboard.type('木');
+  await keys('Escape');
+  assert.equal(await ed(() => __pmg.text(__pmg.editor.selectedObjects()[0])), '木箱');
+});
+
+test('置換（Ctrl+H）: Alt+R で 1 つずつ、Alt+A ですべて置換', async () => {
+  await fresh();
+  await ed(() => { const e = __pmg.editor; e.setText(e.slide.objects[0].id, 'A-A-A'); e.setText(e.slide.objects[1].id, 'A'); });
+  await keys('Control+h');
+  await page.keyboard.type('A');
+  await keys('Tab');
+  await page.keyboard.type('B');
+  await keys('Enter', 'Alt+r');
+  assert.equal(await ed(() => __pmg.text(__pmg.editor.slide.objects[0])), 'B-A-A');
+  await keys('Alt+a');
+  assert.match(await page.textContent('.dialog [role=status]'), /3 個の項目を置換しました/);
+  assert.deepEqual(await ed(() => __pmg.editor.slide.objects.map((o) => __pmg.text(o))), ['B-B-B', 'B']);
+  await keys('Escape', 'Escape', 'Control+z');
+  assert.deepEqual(await ed(() => __pmg.editor.slide.objects.map((o) => __pmg.text(o))), ['B-A-A', 'A'], 'すべて置換は 1 回で戻る');
+});
+
+test('デザイン: テーマ（Alt → G → T → H）・背景（Alt → G → B）・スライドのサイズ（Alt → G → S）', async () => {
+  await fresh();
+  await alt('g', 't', 'h');
+  await keys('ArrowRight', 'Enter'); // 2 番目のテーマ
+  assert.equal(await ed(() => __pmg.editor.pres.theme), 'office2023');
+  await alt('g', 'b');
+  await keys('ArrowDown', 'Enter', 'ArrowDown', 'Enter'); // 背景 1 の 5% 暗い色 → すべてに適用
+  assert.equal(await ed(() => __pmg.editor.pres.slides[0].background), '@bg1:-0.05');
+  await alt('g', 's');
+  await keys('ArrowDown', 'Enter');
+  assert.equal(await ed(() => __pmg.editor.pres.width), 720);
+  const ratio = await ed(() => document.getElementById('slide-canvas').offsetWidth / document.getElementById('slide-canvas').offsetHeight);
+  assert.ok(Math.abs(ratio - 720 / 540) < 0.01, String(ratio));
+});
+
+test('ヘッダーとフッター（Alt → N → H）とレイアウトの変更（Alt → H → L）', async () => {
+  await fresh();
+  await alt('n', 'h');
+  await page.waitForSelector('#hf-num');
+  await keys('Alt+n', 'Alt+f', 'Tab', 'Tab');
+  await page.keyboard.type('社外秘');
+  await keys('Alt+s', 'Enter'); // タイトル スライドにも表示
+  const hf = await ed(() => __pmg.editor.pres.headerFooter);
+  assert.deepEqual([hf.slideNumber, hf.showFooter, hf.footer, hf.hideOnTitle], [true, true, '社外秘', false]);
+  await keys('Tab');
+  await page.keyboard.type('題');
+  await keys('Escape');
+  await alt('h', 'l');
+  await keys('ArrowRight', 'Enter'); // タイトルとコンテンツ
+  assert.equal(await ed(() => __pmg.editor.slide.layout), 'titleContent');
+  assert.equal(await ed(() => __pmg.text(__pmg.editor.slide.objects[0])), '題');
+  assert.deepEqual(errors, []);
 });

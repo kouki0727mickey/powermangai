@@ -55,6 +55,9 @@ export const KEYTIPS = {
       key: 'H', label: 'ホーム',
       children: [
         { key: 'I', label: '新しいスライド', action: 'gallery:layout' },
+        { key: 'L', label: 'レイアウト', action: 'gallery:changeLayout' },
+        { key: 'FD', label: '検索', action: 'find' },
+        { key: 'R', label: '置換', action: 'replace' },
         { key: 'V', label: '貼り付け', action: 'paste' },
         { key: 'X', label: '切り取り', action: 'cut' },
         { key: 'C', label: 'コピー', action: 'copy' },
@@ -103,6 +106,17 @@ export const KEYTIPS = {
         { key: 'SH', label: '図形', action: 'gallery:shapes' },
         { key: 'T', label: '表', action: 'insertTable' },
         { key: 'P', label: '画像（このデバイス）', action: 'insertPicture' },
+        { key: 'H', label: 'ヘッダーとフッター', action: 'headerFooter' },
+        { key: 'D', label: '日付と時刻', action: 'headerFooter' },
+        { key: 'SN', label: 'スライド番号', action: 'headerFooter' },
+      ],
+    },
+    {
+      key: 'G', label: 'デザイン',
+      children: [
+        { key: 'TH', label: 'テーマ', action: 'gallery:themes' },
+        { key: 'S', label: 'スライドのサイズ', action: 'gallery:slideSize' },
+        { key: 'B', label: '背景の書式設定', action: 'palette:background' },
       ],
     },
     {
@@ -152,6 +166,20 @@ export const KEYTIPS = {
       children: [
         { key: 'B', label: '最初から', action: 'showFromStart' },
         { key: 'C', label: '現在のスライドから', action: 'showFromCurrent' },
+        { key: 'H', label: '非表示スライドに設定 / 解除', action: 'hideSlide' },
+      ],
+    },
+    {
+      key: 'W', label: '表示',
+      children: [
+        { key: 'L', label: '標準', action: 'viewNormal' },
+        { key: 'I', label: 'スライド一覧', action: 'viewSorter' },
+        { key: 'D', label: '閲覧表示', action: 'readingView' },
+        { key: 'N', label: 'ノート（ノート欄の表示 / 非表示）', action: 'toggleNotes' },
+        { key: 'Q', label: 'ズーム', action: 'zoom' },
+        { key: 'FW', label: 'ウィンドウに合わせる', action: 'zoomFit' },
+        { key: 'GL', label: 'グリッド線', action: 'toggleGrid' },
+        { key: 'GU', label: 'ガイド', action: 'toggleGuides' },
       ],
     },
     {

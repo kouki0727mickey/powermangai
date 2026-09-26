@@ -21,13 +21,19 @@
 
   <main id="workspace">
     <aside id="thumbs" aria-label="スライド一覧"></aside>
-    <section id="stage" aria-label="スライド編集">
-      <div id="canvas-wrap">
-        <canvas id="slide-canvas"></canvas>
-        <canvas id="overlay-canvas"></canvas>
-        <div id="text-box"><div id="text-editor" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true" aria-label="テキスト編集"></div></div>
-      </div>
-    </section>
+    <div id="center">
+      <section id="stage" aria-label="スライド編集">
+        <div id="canvas-wrap">
+          <canvas id="slide-canvas"></canvas>
+          <canvas id="overlay-canvas"></canvas>
+          <div id="text-box"><div id="text-editor" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true" aria-label="テキスト編集"></div></div>
+        </div>
+      </section>
+      <section id="notes-pane" aria-label="ノート">
+        <textarea id="notes" spellcheck="false" placeholder="クリックしてノートを入力（F6 でここへ移動）"></textarea>
+      </section>
+    </div>
+    <section id="sorter" aria-label="スライド一覧表示" hidden></section>
     <aside id="practice" aria-label="練習">
       <h2 id="practice-title">練習モード</h2>
       <div id="practice-meta"></div>
@@ -46,6 +52,7 @@
     <span id="status-slide"></span>
     <span id="status-pane"></span>
     <span id="status-selection"></span>
+    <span id="status-view"></span>
     <span class="spacer"></span>
     <span id="status-message" role="status"></span>
   </footer>

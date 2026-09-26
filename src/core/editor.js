@@ -8,6 +8,7 @@ import {
 } from './richtext.js';
 import { layoutObjectText, approxMeasure } from './textlayout.js';
 import { findTheme } from './colors.js';
+import { replaceAll as replaceAllText, replaceMatch } from './search.js';
 
 export const FONT_SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96];
 const HISTORY_LIMIT = 200;
@@ -21,7 +22,7 @@ export class Editor {
     this.slideIndex = 0;
     this.selection = [];
     this.editingId = null;
-    this.pane = 'editor'; // 'editor' | 'slides'
+    this.pane = 'editor'; // 'editor' | 'slides' | 'notes' | 'sorter'
     this.undoStack = [];
     this.redoStack = [];
     this.clipboard = null; // { kind: 'objects' | 'slides', items, pasteCount }
@@ -646,9 +647,12 @@ export class Editor {
     return true;
   }
 
+  /** スライド単位の操作をするペインか（スライド一覧・一覧表示） */
+  get slidePane() { return this.pane === 'slides' || this.pane === 'sorter'; }
+
   // ---- クリップボード ----
   copy() {
-    if (this.pane === 'slides') {
+    if (this.slidePane) {
       this.clipboard = { kind: 'slides', items: [clone(this.slide)], pasteCount: 0 };
       return true;
     }
@@ -658,7 +662,7 @@ export class Editor {
   }
 
   cut() {
-    if (this.pane === 'slides') {
+    if (this.slidePane) {
       if (!this.copy()) return false;
       return this.deleteSlide();
     }
@@ -692,7 +696,7 @@ export class Editor {
   }
 
   duplicate() {
-    if (this.pane === 'slides' || this.selection.length === 0) return this.duplicateSlide();
+    if (this.slidePane || this.selection.length === 0) return this.duplicateSlide();
     this.mutate(() => {
       const objs = reidObjects(clone(this.selectedObjects()));
       for (const o of objs) { o.x += PASTE_OFFSET; o.y += PASTE_OFFSET; }
@@ -781,6 +785,125 @@ export class Editor {
     }
     this.newSlide('titleContent');
     return 'newSlide';
+  }
+
+  // ---- ノート・デザイン ----
+  /** ノートの入力中はその場で反映し、ノート欄を離れるときに 1 回の操作として履歴に積む */
+  beginNotes() {
+    this.notesBefore = this.snapshot();
+    this.notesPresBefore = JSON.stringify(this.pres);
+  }
+
+  previewNotes(text) {
+    this.slide.notes = text;
+    this.emit();
+  }
+
+  endNotes() {
+    if (!this.notesBefore) return;
+    if (JSON.stringify(this.pres) !== this.notesPresBefore) {
+      this.undoStack.push(this.notesBefore);
+      this.redoStack = [];
+    }
+    this.notesBefore = null;
+  }
+
+  toggleSlideHidden() {
+    this.mutate(() => { this.slide.hidden = !this.slide.hidden; });
+    return this.slide.hidden;
+  }
+
+  /** 背景の色（all = すべてのスライドに適用、null = テーマの背景） */
+  setBackground(color, all = false) {
+    this.mutate(() => {
+      for (const s of all ? this.pres.slides : [this.slide]) s.background = color;
+    });
+    return true;
+  }
+
+  setTheme(id) {
+    this.mutate(() => { this.pres.theme = id; });
+    return true;
+  }
+
+  /** スライドのサイズを変更し、オブジェクトの位置と幅を比例して調整する */
+  setSlideSize(size) {
+    const kx = size.width / this.pres.width;
+    const ky = size.height / this.pres.height;
+    if (kx === 1 && ky === 1) return false;
+    this.mutate(() => {
+      this.pres.width = size.width;
+      this.pres.height = size.height;
+      for (const s of this.pres.slides) {
+        for (const o of s.objects) {
+          o.x = Math.round(o.x * kx);
+          o.w = Math.round(o.w * kx * 10) / 10;
+          o.y = Math.round(o.y * ky);
+          o.h = Math.round(o.h * ky * 10) / 10;
+          if (o.type === 'table') {
+            o.colWidths = o.colWidths.map((w) => w * kx);
+            o.rowHeights = o.rowHeights.map((h) => h * ky);
+          }
+        }
+      }
+    });
+    return true;
+  }
+
+  setHeaderFooter(hf) {
+    this.mutate(() => { this.pres.headerFooter = { ...this.pres.headerFooter, ...hf }; });
+    return true;
+  }
+
+  /**
+   * スライドのレイアウトを変える。新しいレイアウトのプレースホルダーに、同じ種類の
+   * 既存のプレースホルダーの文字を移す。移し先のないプレースホルダーや他のオブジェクトは残す。
+   */
+  changeLayout(layout) {
+    this.mutate(() => {
+      const slide = this.slide;
+      const fresh = createSlide(layout, this.size);
+      const kind = (ph) => (ph === 'ctrTitle' ? 'title' : ph === 'subTitle' ? 'body' : ph);
+      const old = slide.objects.filter((o) => o.ph);
+      const used = new Set();
+      const next = [];
+      for (const np of fresh.objects) {
+        const match = old.find((o) => !used.has(o) && kind(o.ph) === kind(np.ph));
+        if (match) {
+          used.add(match);
+          // 位置・サイズ・種類は新しいレイアウト、文字は既存のものを使う
+          const hasContent = objText(match) !== '';
+          next.push({ ...match, x: np.x, y: np.y, w: np.w, h: np.h, ph: np.ph, anchor: np.anchor, placeholder: np.placeholder, paragraphs: hasContent ? match.paragraphs : np.paragraphs });
+        } else {
+          next.push(np);
+        }
+      }
+      const others = slide.objects.filter((o) => !o.ph || !used.has(o));
+      // 使わなかった空のプレースホルダーは削除、文字のあるものは残す
+      slide.objects = [...next, ...others.filter((o) => !o.ph || objText(o) !== '')];
+      slide.layout = layout;
+      this.selection = [];
+      this.editingId = null;
+    });
+    return true;
+  }
+
+  /** すべて置換（1 回の操作として履歴に積む） */
+  replaceAll(query, replacement, opts) {
+    let n = 0;
+    this.mutate(() => { n = replaceAllText(this.pres, query, replacement, opts); });
+    return n;
+  }
+
+  /** 1 つの一致を置換 */
+  replaceOne(match, replacement) {
+    const obj = this.pres.slides[match.slide]?.objects.find((o) => o.id === match.objId);
+    if (!obj) return false;
+    this.mutate(() => {
+      const paras = match.cell ? obj.cells[match.cell.r][match.cell.c].paragraphs : obj.paragraphs;
+      replaceMatch(paras, match, replacement);
+    });
+    return true;
   }
 
   // ---- スライド操作 ----
