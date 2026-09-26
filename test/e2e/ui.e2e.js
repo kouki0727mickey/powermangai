@@ -468,3 +468,90 @@ test('入力中の Shift+F3 は絵文字の後ろの選択範囲も正しく変�
   const ps = await runsOf();
   assert.equal(ps[0].runs.map((r) => r.text).join(''), '😀 ab Cd');
 });
+
+// ---------------------------------------------------------------- 図形
+const selObj = () => ed(() => __pmg.editor.selectedObjects()[0]);
+async function insertShape(index) {
+  await alt('n', 's', 'h');
+  for (let i = 0; i < index; i++) await keys('ArrowRight');
+  await keys('Enter');
+}
+
+test('図形ギャラリーは 35 種類、矢印キーで選んで挿入', async () => {
+  await fresh();
+  await alt('n', 's', 'h');
+  assert.equal(await page.$$eval('.gallery .item', (els) => els.length), 35);
+  await keys('ArrowDown', 'Enter'); // 2 行目の先頭 = 8 番目
+  assert.equal((await selObj()).type, 'trapezoid');
+});
+
+test('左右反転・上下反転（Alt → H → G → O → H / V）', async () => {
+  await fresh();
+  await insertShape(0);
+  await alt('h', 'g', 'o', 'h');
+  await alt('h', 'g', 'o', 'v');
+  const o = await selObj();
+  assert.deepEqual([o.flipH, o.flipV], [true, true]);
+});
+
+test('枠線メニューから太さ・点線・矢印（Alt → H → S → O → W / S / R）', async () => {
+  await fresh();
+  await insertShape(32); // 直線
+  assert.equal((await selObj()).type, 'line');
+  await alt('h', 's', 'o'); await keys('w', 'End', 'Enter');
+  await alt('h', 's', 'o'); await keys('s', 'ArrowDown', 'ArrowDown', 'Enter');
+  await alt('h', 's', 'o'); await keys('r', 'ArrowDown', 'Enter');
+  const o = await selObj();
+  assert.deepEqual([o.strokeWidth, o.dash, o.type], [6, 'dot', 'arrow']);
+});
+
+test('影（Alt → H → S → E）とクイック スタイル（Alt → H → Q）', async () => {
+  await fresh();
+  await insertShape(0);
+  await alt('h', 's', 'e'); await keys('ArrowDown', 'Enter');
+  assert.equal((await selObj()).shadow, true);
+  await alt('h', 'q'); await keys('ArrowDown', 'ArrowRight', 'Enter'); // 淡色 - アクセント 1
+  const o = await selObj();
+  assert.deepEqual([o.fill, o.stroke], ['@accent1:0.8', '@accent1']);
+});
+
+test('図形の書式設定（Alt → J → D → O）: Tab で移動して数値入力、色ボタンは Space でパレット', async () => {
+  await fresh();
+  await insertShape(0);
+  await alt('j', 'd', 'o');
+  await page.waitForSelector('#fs-x');
+  await page.keyboard.type('12'); // X（最初の項目は全選択されている）
+  await keys('Tab', 'Tab', 'Tab', 'Tab', 'Tab'); // Y → 幅 → 高さ → 回転 → 縦横比を固定
+  await keys('Space', 'Tab'); // 固定をオン → 塗りつぶしの色
+  await keys('Space');
+  await page.waitForSelector('.palette');
+  await keys('ArrowUp', 'ArrowUp', 'ArrowRight', 'Enter'); // 赤
+  await keys('Tab'); // 透明度
+  await page.keyboard.type('25');
+  await keys('Enter');
+  const o = await selObj();
+  assert.deepEqual([o.x, o.fill, o.opacity], [12, '#FF0000', 0.75]);
+  assert.deepEqual(errors, []);
+});
+
+test('選択ウィンドウ（Alt+F10）: Ctrl+Space で複数選択して Ctrl+G、F2 で名前、Ctrl+Shift+H で非表示', async () => {
+  await fresh();
+  await keys('F8', '1'); // タイトル スライドの課題（プレースホルダー 2 つ）で開始
+  await insertShape(0);
+  await keys('Alt+F10');
+  await page.waitForSelector('.dialog.side');
+  assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('modal-root')).backgroundColor), 'rgba(0, 0, 0, 0)');
+  // 一覧は前面から: 四角形, サブタイトル, タイトル
+  await keys('Home', 'Space', 'End', 'Control+Space');
+  assert.equal(await ed(() => __pmg.editor.selection.length), 2);
+  await keys('ArrowUp', 'F2');
+  await page.keyboard.press('Control+a');
+  await page.keyboard.type('サブ');
+  await keys('Enter');
+  await keys('Control+Shift+H');
+  const s = await ed(() => __pmg.editor.slide.objects.map((o) => [o.name, o.hidden]));
+  assert.deepEqual(s[1], ['サブ', true]);
+  await keys('Escape', 'Control+g');
+  assert.equal(await ed(() => new Set(__pmg.editor.selectedObjects().map((o) => o.groupId)).size), 1);
+  assert.deepEqual(errors, []);
+});

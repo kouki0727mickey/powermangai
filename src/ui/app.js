@@ -2,6 +2,7 @@
 import { Editor } from '../core/editor.js';
 import {
   SHAPE_TYPES, SHAPE_LABELS, LAYOUTS, createPresentation, createSlide, normalizePresentation, hasText, objFont, objText,
+  isLine, displayName, shapeStyles, LINE_WEIGHTS, createObject,
 } from '../core/model.js';
 import { findTheme } from '../core/colors.js';
 import { keyCandidates, findBinding, prettyKey, MODIFIER_KEYS } from '../core/keys.js';
@@ -9,11 +10,11 @@ import { BINDINGS, MOVE_STEP, bindingsByCategory } from '../core/shortcuts.js';
 import { KeyTipSession, KEYTIPS, keyTipPaths } from '../core/keytips.js';
 import { CHALLENGES } from '../core/challenges.js';
 import { scorePresentation, imageSimilarity } from '../core/scoring.js';
-import { drawSlide, drawSelection, slideToDataUrl, measureText, setImageLoadCallback } from './render.js';
+import { drawSlide, drawSelection, drawObject, slideToDataUrl, measureText, setImageLoadCallback } from './render.js';
 import { RichEditor } from './richeditor.js';
 import {
   activeDialog, openPalette, openShapeGallery, openGallery, openInput, openList, openConfirm,
-  openContent, openHelp, openFontDialog, h,
+  openContent, openHelp, openFontDialog, openSelectionPane, openFormatShape, h,
 } from './dialogs.js';
 import { openPresentationFile, savePresentationFile, openImageFile, setFullScreen } from './platform.js';
 
@@ -195,7 +196,7 @@ function renderStatus() {
   $('status-pane').textContent = editor.editingId ? 'テキスト編集中（Esc で終了）' : editor.pane === 'slides' ? 'スライド一覧（F6 で編集領域へ）' : '編集領域';
   const sel = editor.selectedObjects();
   let selText = '選択なし（Tab で選択）';
-  if (sel.length === 1) selText = `選択: ${SHAPE_LABELS[sel[0].type]}`;
+  if (sel.length === 1) selText = `選択: ${displayName(sel[0], editor.slide)}`;
   else if (sel.length > 1) selText = `選択: ${sel.length} 個${sel.every((o) => o.groupId && o.groupId === sel[0].groupId) ? '（グループ）' : ''}`;
   $('status-selection').textContent = selText;
 }
@@ -519,9 +520,71 @@ const ACTIONS = {
     if (r) editor.setFill(r.color);
   }),
   'palette:stroke': sel(async () => {
-    const r = await openPalette('図形の枠線', { current: editor.selectedObjects()[0].stroke, theme: editor.theme });
-    if (r) editor.setStroke(r.color);
+    const o = editor.selectedObjects()[0];
+    const r = await openPalette('図形の枠線', {
+      current: o.stroke, theme: editor.theme,
+      extra: [{ key: 'W', label: '太さ', value: 'weight' }, { key: 'S', label: '実線/点線', value: 'dash' }, { key: 'R', label: '矢印', value: 'arrows' }],
+    });
+    if (!r) return;
+    if (!r.action) { editor.setStroke(r.color); return; }
+    if (r.action === 'weight') {
+      const v = await openList('太さ', LINE_WEIGHTS.map((w) => ({ label: `${w} pt`, value: w })), { initial: Math.max(0, LINE_WEIGHTS.indexOf(o.strokeWidth)) });
+      if (v) editor.applyProps({ strokeWidth: v, stroke: o.stroke ?? '@accent1' });
+    } else if (r.action === 'dash') {
+      const dashes = [['solid', '実線'], ['dash', '破線'], ['dot', '点線'], ['dashDot', '一点鎖線'], ['longDash', '長破線']];
+      const v = await openList('実線 / 点線', dashes.map(([value, label]) => ({ label, value })), { initial: Math.max(0, dashes.findIndex(([d]) => d === o.dash)) });
+      if (v) editor.setObjectProp('dash', v);
+    } else if (r.action === 'arrows') {
+      if (!editor.selectedObjects().some(isLine)) { setStatus('矢印は線を選択しているときに設定できます'); return; }
+      const types = [['line', '矢印なし'], ['arrow', '終点に矢印'], ['doubleArrow', '両端に矢印']];
+      const v = await openList('矢印', types.map(([value, label]) => ({ label, value })));
+      if (v) editor.setLineType(v);
+    }
   }),
+  'gallery:effects': sel(async () => {
+    const v = await openList('図形の効果', [{ label: '影なし', value: 'none' }, { label: '影（外側・右下）', value: 'shadow' }]);
+    if (v) editor.setObjectProp('shadow', v === 'shadow');
+  }),
+  'gallery:shapeStyles': sel(async () => {
+    const styles = shapeStyles();
+    const items = styles.map((st) => {
+      const c = document.createElement('canvas');
+      c.width = 64; c.height = 40;
+      drawObject(c.getContext('2d'), createObject('roundRect', { x: 4, y: 4, w: 56, h: 32, fill: st.fill, stroke: st.stroke, text: 'Abc', font: { size: 13, color: st.text } }), { theme: editor.theme });
+      return { label: st.label, value: st, icon: c };
+    });
+    const v = await openGallery('図形のスタイル', items, { columns: 7 });
+    if (v) editor.applyShapeStyle(v) || setStatus('このオブジェクトにはスタイルを適用できません');
+  }),
+  flip: sel((axis) => editor.flip(axis)),
+  formatShape: sel(async () => {
+    const objs = editor.selectedObjects();
+    const o = objs[0];
+    const patch = await openFormatShape(o, {
+      theme: editor.theme,
+      isLine: isLine(o),
+      hasText: hasText(o),
+      pickColor: (title, current, allowNone) => openPalette(title, { current, allowNone, theme: editor.theme }),
+    });
+    if (!patch) return;
+    // 複数選択のときは名前と位置は変えない（すべて同じになってしまうため）
+    if (objs.length > 1) { delete patch.name; delete patch.x; delete patch.y; }
+    editor.applyProps(patch);
+  }),
+  selectionPane: async () => {
+    commitEdit();
+    editor.pane = 'editor';
+    render();
+    await openSelectionPane({
+      items: () => [...editor.slide.objects].reverse().map((o) => ({
+        id: o.id, name: displayName(o, editor.slide), hidden: o.hidden, selected: editor.selection.includes(o.id),
+      })),
+      select: (id, add) => editor.toggleSelect(id, add),
+      toggleHidden: (id) => editor.toggleHidden(id),
+      rename: (id, name) => editor.renameObject(id, name),
+      move: (id, dir) => { editor.setSelection([id]); editor.reorder(dir > 0 ? 'forward' : 'backward'); },
+    });
+  },
   'palette:fontColor': fmt(
     () => keepTextSelection(async () => {
       const r = await openPalette('フォントの色', { current: rich.currentFont().color, allowNone: false, theme: editor.theme });
@@ -563,6 +626,7 @@ const REPEATABLE = new Set([
   'duplicate', 'paste', 'bold', 'italic', 'underline', 'fontGrow', 'fontShrink', 'moveUp', 'moveDown', 'moveLeft', 'moveRight',
   'nudgeUp', 'nudgeDown', 'nudgeLeft', 'nudgeRight', 'growW', 'shrinkW', 'growH', 'shrinkH', 'rotateRight', 'rotateLeft',
   'rotateBy', 'newSlide', 'reorder', 'arrangeAlign', 'distribute', 'pasteFormat', 'alignLeft', 'alignCenter', 'alignRight', 'alignJustify',
+  'flip', 'strike', 'subscript', 'superscript', 'bullets', 'numbering', 'demote', 'promote',
 ]);
 
 async function inputFontSize() {

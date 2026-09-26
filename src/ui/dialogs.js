@@ -23,8 +23,9 @@ function h(tag, props = {}, ...children) {
 export { h };
 
 class Dialog {
-  constructor(title, foot) {
-    this.el = h('div', { class: 'dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': title });
+  constructor(title, foot, { side = false } = {}) {
+    this.side = side;
+    this.el = h('div', { class: `dialog${side ? ' side' : ''}`, role: 'dialog', 'aria-modal': 'true', 'aria-label': title });
     this.el.append(h('h2', { text: title }));
     this.body = h('div', { class: 'body' });
     this.el.append(this.body);
@@ -37,6 +38,7 @@ class Dialog {
     this.prevFocus = document.activeElement;
     stack.push(this);
     root().append(this.el);
+    root().classList.toggle('side', stack.every((d) => d.side));
     this.focus();
     return this.promise;
   }
@@ -47,6 +49,7 @@ class Dialog {
     const i = stack.indexOf(this);
     if (i !== -1) stack.splice(i, 1);
     this.el.remove();
+    root().classList.toggle('side', stack.length > 0 && stack.every((d) => d.side));
     if (this.prevFocus && document.contains(this.prevFocus)) this.prevFocus.focus();
     this.resolve(result);
   }
@@ -59,9 +62,11 @@ class Dialog {
 }
 
 // ---------------------------------------------------------------- パレット
-export function openPalette(title, { current = null, allowNone = true, theme = DEFAULT_THEME } = {}) {
+/** extra: [{ key: 'W', label: '太さ', value: 'weight' }] — 押すと { action: value } を返す */
+export function openPalette(title, { current = null, allowNone = true, theme = DEFAULT_THEME, extra = [] } = {}) {
   const grid = paletteGrid(theme);
-  const d = new Dialog(title, '矢印キー: 移動 ／ Enter: 決定 ／ N: なし ／ Esc: キャンセル');
+  const extraText = extra.map((x) => ` ／ ${x.key}: ${x.label}`).join('');
+  const d = new Dialog(title, `矢印キー: 移動 ／ Enter: 決定${allowNone ? ' ／ N: なし' : ''}${extraText} ／ Esc: キャンセル`);
   const wrap = h('div', { class: 'palette' });
   const cells = [];
   grid.forEach((row, r) => row.forEach((c, col) => {
@@ -102,6 +107,10 @@ export function openPalette(title, { current = null, allowNone = true, theme = D
       case 'End': pos.c = 9; break;
       default:
         if (allowNone && e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.altKey) { d.close({ color: null }); return true; }
+        {
+          const x = extra.find((it) => it.key.toLowerCase() === e.key.toLowerCase());
+          if (x && !e.ctrlKey && !e.altKey) { d.close({ action: x.value }); return true; }
+        }
         return true; // 他のキーは無視（誤操作防止）
     }
     render();
@@ -387,6 +396,204 @@ export function openFontDialog(font, fontFamilies, theme = DEFAULT_THEME) {
       return true;
     }
     return false; // Space でのチェック切り替えや select の矢印操作はブラウザに任せる
+  };
+  return d.show();
+}
+
+// ---------------------------------------------------------------- 選択ウィンドウ
+/**
+ * api: { items() → [{ id, name, hidden, selected }], select(id, add), toggleHidden(id), rename(id, name), move(id, dir) }
+ * 画面右に表示し、スライドは暗くしない。
+ */
+export function openSelectionPane(api) {
+  const d = new Dialog('選択', '↑↓: 移動 ／ Space: 選択 ／ Ctrl+Space: 選択に追加・解除 ／ F2: 名前の変更 ／ Ctrl+Shift+H: 表示 / 非表示 ／ Ctrl+Shift+↑↓: 前面 / 背面へ ／ Enter・Esc: 閉じる', { side: true });
+  const ul = h('ul', { class: 'list' });
+  d.body.append(ul);
+  let sel = 0;
+  let renaming = null;
+  const render = () => {
+    const items = api.items();
+    sel = Math.max(0, Math.min(items.length - 1, sel));
+    ul.textContent = '';
+    if (!items.length) ul.append(h('li', { text: 'このスライドにはオブジェクトがありません' }));
+    items.forEach((it, i) => {
+      const li = h('li', { class: i === sel ? 'sel' : '' },
+        h('span', { text: it.selected ? '●' : '　', style: { color: 'var(--focus)' } }),
+        h('span', { text: it.name, style: { opacity: it.hidden ? 0.45 : 1 } }),
+        h('span', { class: 'best', text: it.hidden ? '非表示' : '' }));
+      ul.append(li);
+    });
+    ul.children[sel]?.scrollIntoView({ block: 'nearest' });
+  };
+  d.handleKey = (e) => {
+    if (renaming) {
+      if (e.isComposing) return false;
+      if (e.key === 'Enter') { api.rename(renaming.id, renaming.input.value.trim()); renaming = null; render(); d.focus(); return true; }
+      if (e.key === 'Escape') { renaming = null; render(); d.focus(); return true; }
+      return false;
+    }
+    const items = api.items();
+    const cur = items[sel];
+    switch (e.key) {
+      case 'Escape': case 'Enter': case 'F6': d.close(true); return true;
+      case 'ArrowDown':
+        if (e.ctrlKey && e.shiftKey && cur) { api.move(cur.id, -1); sel = Math.min(items.length - 1, sel + 1); break; }
+        sel = Math.min(items.length - 1, sel + 1); break;
+      case 'ArrowUp':
+        if (e.ctrlKey && e.shiftKey && cur) { api.move(cur.id, 1); sel = Math.max(0, sel - 1); break; }
+        sel = Math.max(0, sel - 1); break;
+      case 'Home': sel = 0; break;
+      case 'End': sel = items.length - 1; break;
+      case ' ':
+        if (cur) api.select(cur.id, e.ctrlKey || e.metaKey);
+        break;
+      case 'F2':
+        if (cur) {
+          const input = h('input', { type: 'text', 'aria-label': '名前' });
+          input.value = cur.name;
+          ul.children[sel].replaceChildren(input);
+          renaming = { id: cur.id, input };
+          input.focus();
+          input.select();
+        }
+        return true;
+      default:
+        if (e.key === 'F10' && e.altKey) { d.close(true); return true; }
+        if ((e.key === 'H' || e.key === 'h') && e.ctrlKey && e.shiftKey && cur) { api.toggleHidden(cur.id); break; }
+        return true;
+    }
+    render();
+    return true;
+  };
+  render();
+  return d.show();
+}
+
+// ---------------------------------------------------------------- 図形の書式設定
+/**
+ * o: 選択中の先頭のオブジェクト。pickColor(title, current, allowNone) → Promise<{ color } | null>。
+ * 戻り値: 変更するプロパティ（patch）か null。
+ */
+export function openFormatShape(o, { theme = DEFAULT_THEME, pickColor, isLine = false, hasText = true } = {}) {
+  const d = new Dialog('図形の書式設定', 'Tab / Shift+Tab: 項目の移動 ／ Space: 色の選択・チェック切り替え ／ Enter: OK ／ Esc: キャンセル');
+  const fields = [];
+  const num = (id, label, value, step = 1) => {
+    const el = h('input', { type: 'text', id, inputmode: 'decimal' });
+    el.value = String(Math.round(value * 100) / 100);
+    el.dataset.step = String(step);
+    fields.push(el);
+    return h('div', { class: 'form-row' }, h('label', { for: id, text: label }), el);
+  };
+  const colorBtn = (id, label, value, allowNone) => {
+    const sw = h('span', { class: 'swatch-inline' });
+    const txt = h('span');
+    const btn = h('button', { type: 'button', id, class: 'color-btn' }, sw, ' ', txt);
+    btn.dataset.value = value ?? '';
+    const paint = () => {
+      const v = btn.dataset.value || null;
+      sw.style.background = v ? resolveColor(v, theme) : 'transparent';
+      txt.textContent = v ? resolveColor(v, theme) : 'なし';
+    };
+    paint();
+    btn.addEventListener('click', async () => {
+      const r = await pickColor(label, btn.dataset.value || null, allowNone);
+      if (r && !r.action) { btn.dataset.value = r.color ?? ''; paint(); }
+      btn.focus();
+    });
+    fields.push(btn);
+    return h('div', { class: 'form-row' }, h('label', { for: id, text: label }), btn);
+  };
+  const check = (id, label, checked) => {
+    const el = h('input', { type: 'checkbox', id });
+    el.checked = checked;
+    fields.push(el);
+    return h('div', { class: 'form-row' }, h('label', { for: id, text: label }), el);
+  };
+  const select = (id, label, options, value) => {
+    const el = h('select', { id });
+    for (const [v, t] of options) el.append(h('option', { value: v, text: t }));
+    el.value = value;
+    fields.push(el);
+    return h('div', { class: 'form-row' }, h('label', { for: id, text: label }), el);
+  };
+  const section = (t) => h('h3', { text: t, style: { margin: '10px 0 4px', fontSize: '13px' } });
+  d.body.append(
+    section('サイズと位置'),
+    num('fs-x', '横位置 (X)', o.x), num('fs-y', '縦位置 (Y)', o.y),
+    num('fs-w', '幅', o.w), num('fs-h', '高さ', o.h), num('fs-rot', '回転 (°)', o.rotation),
+    check('fs-lock', '縦横比を固定', false),
+    section('塗りつぶしと線'),
+  );
+  if (!isLine) d.body.append(colorBtn('fs-fill', '塗りつぶしの色', o.fill, true), num('fs-alpha', '透明度 (%)', Math.round((1 - (o.opacity ?? 1)) * 100)));
+  else d.body.append(num('fs-alpha', '透明度 (%)', Math.round((1 - (o.opacity ?? 1)) * 100)));
+  d.body.append(
+    colorBtn('fs-stroke', '線の色', o.stroke, true),
+    num('fs-sw', '線の幅 (pt)', o.strokeWidth, 0.25),
+    select('fs-dash', '実線 / 点線', [['solid', '実線'], ['dash', '破線'], ['dot', '点線'], ['dashDot', '一点鎖線'], ['longDash', '長破線']], o.dash || 'solid'),
+    section('効果'),
+    check('fs-shadow', '影', !!o.shadow),
+  );
+  if (hasText) {
+    d.body.append(
+      section('テキスト ボックス'),
+      select('fs-anchor', '垂直方向の配置', [['top', '上'], ['middle', '上下中央'], ['bottom', '下']], o.anchor),
+      select('fs-autofit', '自動調整', [['none', '自動調整なし'], ['shape', 'テキストに合わせて図形のサイズを調整']], o.autoFit),
+      check('fs-wrap', '図形内でテキストを折り返す', o.wrap !== false),
+      num('fs-il', '左余白', o.inset.l, 0.1), num('fs-it', '上余白', o.inset.t, 0.1),
+      num('fs-ir', '右余白', o.inset.r, 0.1), num('fs-ib', '下余白', o.inset.b, 0.1),
+    );
+  }
+  const nameEl = h('input', { type: 'text', id: 'fs-name' });
+  nameEl.value = o.name || '';
+  fields.push(nameEl);
+  d.body.append(section('その他'), h('div', { class: 'form-row' }, h('label', { for: 'fs-name', text: '名前' }), nameEl));
+  const err = h('div', { style: { color: 'var(--ng)', minHeight: '18px' } });
+  d.body.append(err);
+
+  const val = (id) => d.el.querySelector(`#${id}`);
+  const lockRatio = o.h ? o.w / o.h : 1;
+  // 縦横比を固定しているときは、幅（高さ）の変更に合わせて高さ（幅）も変える
+  val('fs-w').addEventListener('input', () => { if (val('fs-lock').checked && Number.isFinite(Number(val('fs-w').value))) val('fs-h').value = String(Math.round((Number(val('fs-w').value) / lockRatio) * 100) / 100); });
+  val('fs-h').addEventListener('input', () => { if (val('fs-lock').checked && Number.isFinite(Number(val('fs-h').value))) val('fs-w').value = String(Math.round(Number(val('fs-h').value) * lockRatio * 100) / 100); });
+
+  d.focus = () => { fields[0].focus(); fields[0].select?.(); };
+  d.handleKey = (e) => {
+    if (e.isComposing) return false;
+    if (e.key === 'Escape') { d.close(null); return true; }
+    if (e.key === 'Tab') {
+      const i = fields.indexOf(document.activeElement);
+      const next = (i + (e.shiftKey ? -1 : 1) + fields.length) % fields.length;
+      fields[next].focus();
+      fields[next].select?.();
+      return true;
+    }
+    if (e.key === 'Enter') {
+      const n = (id) => Number(val(id).value);
+      const nums = ['fs-x', 'fs-y', 'fs-w', 'fs-h', 'fs-rot', 'fs-sw', 'fs-alpha', ...(hasText ? ['fs-il', 'fs-it', 'fs-ir', 'fs-ib'] : [])];
+      const bad = nums.find((id) => val(id) && !Number.isFinite(n(id)));
+      if (bad) { err.textContent = '数値を入力してください'; val(bad).focus(); val(bad).select(); return true; }
+      if (n('fs-alpha') < 0 || n('fs-alpha') > 100) { err.textContent = '透明度は 0〜100 で入力してください'; val('fs-alpha').focus(); return true; }
+      if (n('fs-w') < 0 || n('fs-h') < 0 || n('fs-sw') < 0) { err.textContent = 'サイズと線の幅は 0 以上で入力してください'; return true; }
+      const patch = {
+        x: n('fs-x'), y: n('fs-y'), w: n('fs-w'), h: n('fs-h'), rotation: n('fs-rot'),
+        opacity: 1 - n('fs-alpha') / 100,
+        stroke: val('fs-stroke').dataset.value || null,
+        strokeWidth: n('fs-sw'),
+        dash: val('fs-dash').value,
+        shadow: val('fs-shadow').checked,
+        name: nameEl.value.trim(),
+      };
+      if (!isLine) patch.fill = val('fs-fill').dataset.value || null;
+      if (hasText) {
+        patch.anchor = val('fs-anchor').value;
+        patch.autoFit = val('fs-autofit').value;
+        patch.wrap = val('fs-wrap').checked;
+        patch.inset = { l: n('fs-il'), t: n('fs-it'), r: n('fs-ir'), b: n('fs-ib') };
+      }
+      d.close(patch);
+      return true;
+    }
+    return false; // Space（色ボタン・チェック）や select の矢印はブラウザに任せる
   };
   return d.show();
 }

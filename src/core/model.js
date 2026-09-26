@@ -312,6 +312,33 @@ export function normalizePresentation(data) {
   return pres;
 }
 
+/** 選択ウィンドウなどで表示する名前（名前がなければ「種類 番号」） */
+export function displayName(o, slide) {
+  if (o.name) return o.name;
+  const i = slide ? slide.objects.indexOf(o) : -1;
+  return `${SHAPE_LABELS[o.type] || o.type} ${i + 1}`;
+}
+
+/** 図形のクイック スタイル（テーマの色の組み合わせ） */
+export function shapeStyles() {
+  const keys = ['tx1', 'accent1', 'accent2', 'accent3', 'accent4', 'accent5', 'accent6'];
+  const out = [];
+  for (const [kind, label] of [['colored', '塗りつぶし'], ['light', '淡色'], ['outline', '枠線のみ'], ['intense', '濃色']]) {
+    for (const k of keys) {
+      const style = {
+        colored: { fill: `@${k}`, stroke: `@${k}:-0.5`, text: '@bg1' },
+        light: { fill: `@${k}:0.8`, stroke: `@${k}`, text: '@tx1' },
+        outline: { fill: '@bg1', stroke: `@${k}`, text: '@tx1' },
+        intense: { fill: `@${k}:-0.25`, stroke: null, text: '@bg1' },
+      }[kind];
+      out.push({ ...style, label: `${label} - ${k === 'tx1' ? '黒' : `アクセント ${k.slice(-1)}`}` });
+    }
+  }
+  return out;
+}
+
+export const LINE_WEIGHTS = [0.25, 0.5, 0.75, 1, 1.5, 2.25, 3, 4.5, 6];
+
 /** オブジェクトの外接矩形（回転は無視） */
 export function bounds(objs) {
   if (objs.length === 0) return null;

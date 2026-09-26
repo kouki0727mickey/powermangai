@@ -141,7 +141,8 @@ export class Editor {
 
   /** Tab / Shift+Tab で次（前）のオブジェクトを選択 */
   selectNext(dir = 1) {
-    const units = this.units();
+    // 非表示（選択ウィンドウで隠した）オブジェクトは Tab で選ばない
+    const units = this.units().filter((u) => u.some((id) => !this.findObject(id).hidden));
     if (units.length === 0) { this.setSelection([]); return; }
     const cur = units.findIndex((u) => u.some((id) => this.selection.includes(id)));
     let next;
@@ -150,7 +151,15 @@ export class Editor {
     this.setSelection(units[next]);
   }
 
-  selectAll() { this.setSelection(this.slide.objects.map((o) => o.id)); }
+  selectAll() { this.setSelection(this.slide.objects.filter((o) => !o.hidden).map((o) => o.id)); }
+
+  /** 選択ウィンドウ: 1 つを選択（add = true なら選択に追加 / 解除） */
+  toggleSelect(id, add) {
+    if (!add) { this.setSelection([id]); return; }
+    const ids = this.expandGroups([id]);
+    const on = ids.every((x) => this.selection.includes(x));
+    this.setSelection(on ? this.selection.filter((x) => !ids.includes(x)) : [...this.selection, ...ids]);
+  }
   clearSelection() { this.setSelection([]); }
 
   // ---- 挿入 ----
@@ -203,6 +212,65 @@ export class Editor {
     return this.updateSelected((o) => {
       o[prop] = Math.max(o.type === 'line' ? 0 : 1, Math.round(value));
     });
+  }
+
+  /** 左右 / 上下反転（axis: 'h' | 'v'） */
+  flip(axis) {
+    return this.updateSelected((o) => {
+      if (axis === 'h') o.flipH = !o.flipH;
+      else o.flipV = !o.flipV;
+    });
+  }
+
+  /** 線の種類（矢印の有無）を変える: line / arrow / doubleArrow */
+  setLineType(type) {
+    return this.setObjectProp('type', type, isLine);
+  }
+
+  /** 図形のスタイル（塗りつぶし・枠線・文字の色の組み合わせ） */
+  applyShapeStyle(style) {
+    const objs = this.selectedObjects().filter((o) => !isLine(o) && o.type !== 'image' && o.type !== 'table');
+    if (objs.length === 0) return false;
+    this.mutate(() => {
+      for (const o of objs) {
+        o.fill = style.fill;
+        o.stroke = style.stroke;
+        if (style.text) applyFontAll(o.paragraphs, (f) => { f.color = style.text; });
+      }
+    });
+    return true;
+  }
+
+  /** 図形の書式設定ダイアログの結果をまとめて適用（patch は選択中の各オブジェクトに適用） */
+  applyProps(patch) {
+    return this.updateSelected((o) => {
+      for (const [k, v] of Object.entries(patch)) {
+        if (v === undefined) continue;
+        if (k === 'inset') o.inset = { ...o.inset, ...v };
+        else if (k === 'fill' && (isLine(o) || o.type === 'image')) continue;
+        else o[k] = v;
+      }
+      if (o.w < (isLine(o) ? 0 : 1)) o.w = 1;
+      if (o.h < (isLine(o) ? 0 : 1)) o.h = 1;
+      o.rotation = (((o.rotation % 360) + 360) % 360);
+    });
+  }
+
+  renameObject(id, name) {
+    const o = this.findObject(id);
+    if (!o || o.name === name) return false;
+    this.mutate(() => { o.name = name; });
+    return true;
+  }
+
+  toggleHidden(id) {
+    const o = this.findObject(id);
+    if (!o) return false;
+    this.mutate(() => {
+      o.hidden = !o.hidden;
+      if (o.hidden) this.selection = this.selection.filter((x) => x !== id);
+    });
+    return true;
   }
 
   rotate(deg) {

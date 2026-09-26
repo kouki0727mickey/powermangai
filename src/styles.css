@@ -111,6 +111,10 @@ body.mouse-blocked * { cursor: not-allowed !important; }
 #keytips .kt-buffer { color: var(--muted); margin-top: 6px; font-size: 12px; }
 
 #modal-root:empty { display: none; }
+#modal-root.side { background: transparent; justify-content: flex-end; align-items: stretch; pointer-events: none; }
+#modal-root.side .dialog { pointer-events: auto; }
+.dialog.side { width: 320px; max-height: none; height: calc(100vh - 120px); margin: 96px 8px 24px 0; }
+.color-btn { font: inherit; padding: 2px 8px; background: #fff; border: 1px solid #bbb; }
 #modal-root {
   position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 40;
   display: flex; align-items: center; justify-content: center;

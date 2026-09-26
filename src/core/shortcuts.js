@@ -75,6 +75,7 @@ export const BINDINGS = [
   { action: 'rotateLeft', keys: ['Alt+ArrowLeft'], contexts: E, category: '図形', label: '左へ 15° 回転' },
   { action: 'rotateRightFine', keys: ['Ctrl+Alt+ArrowRight'], contexts: E, category: '図形', label: '右へ 1° 回転' },
   { action: 'rotateLeftFine', keys: ['Ctrl+Alt+ArrowLeft'], contexts: E, category: '図形', label: '左へ 1° 回転' },
+  { action: 'selectionPane', keys: ['Alt+F10'], contexts: ES, category: '図形', label: '選択ウィンドウ（オブジェクトの選択と表示）' },
   { action: 'group', keys: ['Ctrl+G'], contexts: E, category: '図形', label: 'グループ化' },
   { action: 'ungroup', keys: ['Ctrl+Shift+G'], contexts: E, category: '図形', label: 'グループ解除' },
   { action: 'bringToFront', keys: ['Ctrl+Shift+]'], contexts: E, category: '図形', label: '最前面へ移動' },
