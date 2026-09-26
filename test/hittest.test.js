@@ -72,3 +72,12 @@ test('線の端点の移動と回転角', () => {
   assert.equal(rotationFromPoint(o, 200, 400), 180);
   assert.equal(rotationFromPoint(o, 300, 60, true) % 15, 0, 'Shift で 15° 刻み');
 });
+
+test('縦横比の維持: 角を内側へドラッグすると縮む、辺でも比率を保つ', () => {
+  const o = rect({});
+  const k = resizeByHandle(o, 'se', -100, 0, { keepAspect: true });
+  assert.deepEqual([k.w, k.h], [100, 50]);
+  const e = resizeByHandle(o, 'e', 100, 0, { keepAspect: true });
+  assert.deepEqual([e.w, e.h], [300, 150]);
+  assert.ok(near(e.y + e.h / 2, 150), '辺のハンドルでは高さは中心を保って変わる');
+});

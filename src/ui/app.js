@@ -2344,6 +2344,8 @@ function onKeyDown(e) {
     if (d.started && d.mode !== 'marquee') editor.endGesture(true); else render();
     return;
   }
+  // ドラッグ中はほかのキー操作を受け付けない（Ctrl+Z などで履歴が食い違わないように）
+  if (app.drag) { if (!MODIFIER_KEYS.has(e.key)) e.preventDefault(); return; }
 
   // ダイアログはスライドショー中（すべてのスライドの一覧など）にも表示される
   const dlg = activeDialog();
@@ -2549,7 +2551,7 @@ window.addEventListener('mousemove', (e) => {
   editor.updateGesture(() => {
     if (d.mode === 'resize') {
       const keepAspect = e.shiftKey || (d.orig.type === 'image' && d.orig.lockAspect !== false);
-      editor.setBox(o, resizeByHandle(d.orig, d.handle, dx, dy, { keepAspect }));
+      editor.setBox(o, resizeByHandle(d.orig, d.handle, dx, dy, { keepAspect }), d.orig);
     } else if (d.mode === 'lineEnd') {
       Object.assign(o, moveLineEnd(d.orig, d.handle, p.x, p.y));
     } else if (d.mode === 'rotate') {
@@ -2649,9 +2651,11 @@ $('sorter').addEventListener('dblclick', (e) => {
 // アウトライン: クリックした行へ
 outlineEl.addEventListener('mousedown', (e) => {
   const row = e.target.closest('.ol-line');
-  if (!row || e.button !== 0 || row.querySelector('input')) { if (row) editor.pane = 'outline'; return; }
+  if (!row || e.button !== 0) return;
+  // F6 で移るときと同じく、スライドの文字・ノートの編集を確定してから
+  if (editor.pane !== 'outline') { commitEdit(); leaveNotes(); editor.pane = 'outline'; }
+  if (row.querySelector('input')) return; // 編集中の行はブラウザにまかせる（カーソルの位置）
   e.preventDefault();
-  editor.pane = 'outline';
   gotoOutlineLine([...outlineEl.querySelectorAll('.ol-line')].indexOf(row));
 });
 
@@ -2695,9 +2699,16 @@ $('slideshow').addEventListener('mousedown', (e) => {
   e.preventDefault();
   handleShowKey({ key: 'ArrowRight', code: 'ArrowRight', preventDefault() {} });
 });
+// タッチパッドは細かいイベントが続けて来るので、ある程度たまってから、間隔をあけて 1 枚ずつ
+let wheelAcc = 0, wheelAt = 0;
 $('slideshow').addEventListener('wheel', (e) => {
   if (!app.show || activeDialog()) return;
-  const key = e.deltaY > 0 ? 'ArrowRight' : 'ArrowLeft';
+  wheelAcc += e.deltaY;
+  const now = performance.now();
+  if (Math.abs(wheelAcc) < 50 || now - wheelAt < 350) return;
+  const key = wheelAcc > 0 ? 'ArrowRight' : 'ArrowLeft';
+  wheelAcc = 0;
+  wheelAt = now;
   handleShowKey({ key, code: key, preventDefault() {} });
 }, { passive: true });
 

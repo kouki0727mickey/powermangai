@@ -102,8 +102,10 @@ export function resizeByHandle(orig, handle, dx, dy, { keepAspect = false, min =
   const l = rotatePoint(dx, dy, 0, 0, -rot);
   let w = sx ? Math.max(min, orig.w + sx * l.x) : orig.w;
   let h = sy ? Math.max(min, orig.h + sy * l.y) : orig.h;
-  if (keepAspect && sx && sy && orig.w > 0 && orig.h > 0) {
-    const k = Math.max(w / orig.w, h / orig.h);
+  if (keepAspect && orig.w > 0 && orig.h > 0) {
+    // 角は大きく変わった方向に合わせる（内側へのドラッグでも縮む）。辺はもう一方も同じ比率で変える
+    const kx = w / orig.w, ky = h / orig.h;
+    const k = !sy ? kx : !sx ? ky : Math.abs(kx - 1) >= Math.abs(ky - 1) ? kx : ky;
     w = Math.max(min, orig.w * k);
     h = Math.max(min, orig.h * k);
   }

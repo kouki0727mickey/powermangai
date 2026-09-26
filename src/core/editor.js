@@ -327,6 +327,7 @@ export class Editor {
   beginGesture() {
     this.gestureBefore = this.snapshot();
     this.gesturePres = JSON.stringify(this.pres);
+    this.gestureRevision = this.revision;
   }
 
   /** ドラッグ中の変更（fn で図形を変える）。履歴には積まず、画面だけ更新する */
@@ -343,8 +344,9 @@ export class Editor {
     const before = this.gestureBefore;
     if (!before) return false;
     this.gestureBefore = null;
-    if (cancel) { this.restore(before); this.emit(); return false; }
-    if (JSON.stringify(this.pres) === this.gesturePres) return false;
+    // 取り消した・元の位置に戻したドラッグは変更として数えない
+    if (cancel) { this.restore(before); this.revision = this.gestureRevision; this.emit(); return false; }
+    if (JSON.stringify(this.pres) === this.gesturePres) { this.revision = this.gestureRevision; this.emit(); return false; }
     this.pushUndo(before);
     this.redoStack = [];
     this.outlineMergeKey = null;
@@ -352,12 +354,12 @@ export class Editor {
     return true;
   }
 
-  /** 図形の大きさを変える（表は列幅・行の高さを比例させる） */
-  setBox(o, box) {
+  /** 図形の大きさを変える（表は列幅・行の高さを、ドラッグ開始時の表 orig から比例させる） */
+  setBox(o, box, orig = o) {
     if (o.type === 'table') {
       const w = Math.max(10, box.w), h = Math.max(10, box.h);
-      o.colWidths = o.colWidths.map((cw) => (cw * w) / o.w);
-      o.rowHeights = o.rowHeights.map((rh) => Math.max(8, (rh * h) / o.h));
+      o.colWidths = orig.colWidths.map((cw) => (cw * w) / orig.w);
+      o.rowHeights = orig.rowHeights.map((rh) => Math.max(8, (rh * h) / orig.h));
       o.x = box.x; o.y = box.y;
       return;
     }
