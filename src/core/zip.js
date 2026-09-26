@@ -22,7 +22,24 @@ async function pipe(data, stream) {
 }
 
 export const deflateRaw = (data) => pipe(data, new CompressionStream('deflate-raw'));
-export const inflateRaw = (data) => pipe(data, new DecompressionStream('deflate-raw'));
+
+/** 展開（limit バイトを超えたら中止する: 申告サイズを偽った ZIP 爆弾対策） */
+export async function inflateRaw(data, limit = Infinity) {
+  const reader = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > limit) { await reader.cancel(); throw new Error('ファイルが大きすぎます'); }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const c of chunks) { out.set(c, o); o += c.length; }
+  return out;
+}
 
 const MAX_ENTRY = 200 * 1024 * 1024; // 展開後 200MB を超えるファイルは読まない（異常なファイル対策）
 
@@ -56,11 +73,13 @@ export async function readZip(buf) {
     if (dv.getUint32(local, true) !== 0x04034b50) throw new Error(`ZIP のファイルが壊れています: ${name}`);
     const start = local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true);
     const raw = u8.subarray(start, start + compSize);
-    total += size;
-    if (size > MAX_ENTRY || total > MAX_ENTRY * 2) throw new Error('ファイルが大きすぎます');
+    if (size > MAX_ENTRY) throw new Error('ファイルが大きすぎます');
     if (method === 0) files[name] = raw.slice();
-    else if (method === 8) files[name] = await inflateRaw(raw);
+    else if (method === 8) files[name] = await inflateRaw(raw, Math.min(MAX_ENTRY, MAX_ENTRY * 2 - total));
     else throw new Error(`対応していない圧縮形式です: ${name}`);
+    // 申告サイズではなく実際に展開したサイズで合計を数える
+    total += files[name].length;
+    if (total > MAX_ENTRY * 2) throw new Error('ファイルが大きすぎます');
   }
   return files;
 }

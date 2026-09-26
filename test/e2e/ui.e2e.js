@@ -956,3 +956,17 @@ test('読み込めない内容があれば一覧を表示する', async () => {
   assert.match(await page.textContent('.dialog'), /グラフ・SmartArt/);
   await keys('Enter');
 });
+
+test('.pptx に保存するとき SVG の画像は PNG に変換される', async () => {
+  await fresh();
+  const svg = 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="red"/></svg>').toString('base64');
+  await page.evaluate((src) => __pmg.editor.insertImage(src, { w: 40, h: 20 }), svg);
+  page.once('dialog', (d) => d.accept('svg.pptx'));
+  const download = page.waitForEvent('download');
+  await keys('F12');
+  const buf = await (await import('node:fs/promises')).readFile(await (await download).path());
+  const { readZip } = await import('../../src/core/zip.js');
+  const files = await readZip(buf);
+  assert.ok(Object.keys(files).some((f) => /^ppt\/media\/image\d+\.png$/.test(f)));
+  assert.ok(!Object.keys(files).some((f) => f.endsWith('.svg')));
+});

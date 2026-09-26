@@ -58,3 +58,16 @@ test('XML の書き出し', () => {
   assert.equal(esc('a\u0001b\tc'), 'ab\tc');
   assert.equal(tag('b', { v: true }), '<b v="1"/>');
 });
+
+test('XML: 壊れた記述はエラーになる（止まらない）', () => {
+  for (const bad of ['<a><?x', '<a><!-- x', '<a><!x', '<a b="1><c/></a>', '<a b=1/>', '<a', '<a><![CDATA[x', '<a><b>text']) {
+    assert.throws(() => parseXml(bad), /XML/, bad);
+  }
+});
+
+test('ZIP: 申告より大きく展開されるデータは上限で止まる', async () => {
+  const { inflateRaw, deflateRaw } = await import('../src/core/zip.js');
+  const big = await deflateRaw(new Uint8Array(1_000_000));
+  await assert.rejects(inflateRaw(big, 1000), /大きすぎ/);
+  assert.equal((await inflateRaw(big)).length, 1_000_000);
+});

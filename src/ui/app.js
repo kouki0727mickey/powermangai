@@ -1232,6 +1232,27 @@ function togglePane(dir = 1) {
   render();
 }
 
+/** 古い PowerPoint でも表示できるよう、SVG / WebP の画像を PNG にしたコピーを返す */
+async function rasterizeForPptx(pres) {
+  const needs = (o) => o.type === 'image' && /^data:image\/(svg\+xml|webp);/.test(o.src);
+  if (!pres.slides.some((sl) => sl.objects.some(needs))) return pres;
+  const copy = JSON.parse(JSON.stringify(pres));
+  for (const sl of copy.slides) {
+    for (const o of sl.objects) {
+      if (!needs(o)) continue;
+      try {
+        const img = await new Promise((resolve, reject) => { const im = new Image(); im.onload = () => resolve(im); im.onerror = reject; im.src = o.src; });
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.naturalWidth || o.w * 2));
+        c.height = Math.max(1, Math.round(img.naturalHeight || o.h * 2));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        o.src = c.toDataURL('image/png');
+      } catch { /* 変換できない画像はそのまま */ }
+    }
+  }
+  return copy;
+}
+
 /** 保存。形式はファイルの拡張子で決まる（.pptx = PowerPoint、それ以外 = このアプリの形式）。保存したら true */
 async function save(saveAs) {
   commitEdit();
@@ -1239,7 +1260,7 @@ async function save(saveAs) {
   try {
     const target = await chooseSavePath(app.filePath, saveAs, 'presentation.pptx');
     if (!target) return false;
-    const content = /\.pptx$/i.test(target) ? await exportPptx(editor.pres) : JSON.stringify(editor.pres, null, 2);
+    const content = /\.pptx$/i.test(target) ? await exportPptx(await rasterizeForPptx(editor.pres)) : JSON.stringify(editor.pres, null, 2);
     const r = await writePresentationFile(target, content);
     app.filePath = r.path;
     markSaved();

@@ -122,11 +122,11 @@ function spXml(o, id, slideCtx) {
   const name = o.name || `${o.ph ? 'Placeholder' : o.type === 'text' ? 'TextBox' : 'Shape'} ${id}`;
   if (isLine(o)) {
     return tag('p:cxnSp', {},
-      tag('p:nvCxnSpPr', {}, tag('p:cNvPr', { id, name }), tag('p:cNvCxnSpPr'), tag('p:nvPr')),
+      tag('p:nvCxnSpPr', {}, tag('p:cNvPr', { id, name, hidden: o.hidden ? 1 : undefined }), tag('p:cNvCxnSpPr'), tag('p:nvPr')),
       tag('p:spPr', {}, xfrm(o), tag('a:prstGeom', { prst: 'line' }, tag('a:avLst')), lnXml(o), shadowXml(o)));
   }
   const nv = tag('p:nvSpPr', {},
-    tag('p:cNvPr', { id, name }),
+    tag('p:cNvPr', { id, name, hidden: o.hidden ? 1 : undefined }),
     tag('p:cNvSpPr', { txBox: o.type === 'text' && !o.ph ? 1 : undefined }, o.ph ? tag('a:spLocks', { noGrp: 1 }) : ''),
     tag('p:nvPr', {}, phXml(o, slideCtx)));
   const spPr = tag('p:spPr', {}, xfrm(o), tag('a:prstGeom', { prst: prstOf(o.type) }, tag('a:avLst')), fill(o.fill, o.opacity ?? 1), lnXml(o), shadowXml(o));
@@ -135,7 +135,7 @@ function spXml(o, id, slideCtx) {
 
 function picXml(o, id, rid) {
   return tag('p:pic', {},
-    tag('p:nvPicPr', {}, tag('p:cNvPr', { id, name: o.name || `Picture ${id}` }), tag('p:cNvPicPr', {}, tag('a:picLocks', { noChangeAspect: 1 })), tag('p:nvPr')),
+    tag('p:nvPicPr', {}, tag('p:cNvPr', { id, name: o.name || `Picture ${id}`, hidden: o.hidden ? 1 : undefined }), tag('p:cNvPicPr', {}, tag('a:picLocks', { noChangeAspect: 1 })), tag('p:nvPr')),
     tag('p:blipFill', {}, tag('a:blip', { 'r:embed': rid }), tag('a:stretch', {}, tag('a:fillRect'))),
     tag('p:spPr', {}, xfrm(o), tag('a:prstGeom', { prst: 'rect' }, tag('a:avLst')), o.stroke && o.strokeWidth ? lnXml(o) : '', shadowXml(o)));
 }
@@ -146,7 +146,7 @@ function tableXml(o, id) {
     tag('a:txBody', {}, tag('a:bodyPr'), tag('a:lstStyle'), cell.paragraphs.map(paragraphXml)),
     tag('a:tcPr', { marL: emu(7.2), marR: emu(7.2), marT: emu(3.6), marB: emu(3.6) }, cell.fill ? fill(cell.fill) : '')))));
   return tag('p:graphicFrame', {},
-    tag('p:nvGraphicFramePr', {}, tag('p:cNvPr', { id, name: o.name || `Table ${id}` }), tag('p:cNvGraphicFramePr', {}, tag('a:graphicFrameLocks', { noGrp: 1 })), tag('p:nvPr')),
+    tag('p:nvGraphicFramePr', {}, tag('p:cNvPr', { id, name: o.name || `Table ${id}`, hidden: o.hidden ? 1 : undefined }), tag('p:cNvGraphicFramePr', {}, tag('a:graphicFrameLocks', { noGrp: 1 })), tag('p:nvPr')),
     tag('p:xfrm', {}, tag('a:off', { x: emu(o.x), y: emu(o.y) }), tag('a:ext', { cx: emu(o.w), cy: emu(lay.total) })),
     tag('a:graphic', {}, tag('a:graphicData', { uri: 'http://schemas.openxmlformats.org/drawingml/2006/table' },
       tag('a:tbl', {},
@@ -186,7 +186,12 @@ function transitionXml(tr) {
     uncover: tag('p:pull', { dir: d }),
     zoom: tag('p:zoom'),
   }[tr.type];
-  return child ? tag('p:transition', { spd }, child) : '';
+  if (!child) return '';
+  // 正確な時間は PowerPoint 2010 以降の p14:dur で書く（古いアプリ用に spd だけの版も付ける）
+  const dur = Math.round(tr.duration * 1000);
+  return tag('mc:AlternateContent', { 'xmlns:mc': 'http://schemas.openxmlformats.org/markup-compatibility/2006' },
+    tag('mc:Choice', { 'xmlns:p14': 'http://schemas.microsoft.com/office/powerpoint/2010/main', Requires: 'p14' }, tag('p:transition', { spd, 'p14:dur': dur }, child)),
+    tag('mc:Fallback', {}, tag('p:transition', { spd }, child)));
 }
 
 // ---------------------------------------------------------------- アニメーション（p:timing）
@@ -296,9 +301,9 @@ function slideXml(pres, slide, index, rels) {
     return spXml(o, id, ctx);
   };
   for (const o of slide.objects) {
-    if (done.has(o.id) || o.hidden) continue;
+    if (done.has(o.id)) continue;
     if (o.groupId) {
-      const members = slide.objects.filter((x) => x.groupId === o.groupId && !x.hidden);
+      const members = slide.objects.filter((x) => x.groupId === o.groupId);
       members.forEach((m) => done.add(m.id));
       const b = bounds(members);
       const gid = nextId();

@@ -52,17 +52,19 @@ export function parseXml(src) {
       if (cur.children.length === 0 || typeof cur.children[cur.children.length - 1] !== 'string') cur.children.push(decodeEntities(t));
       else cur.children[cur.children.length - 1] += decodeEntities(t);
     }
-    if (text.startsWith('<?', lt)) { i = text.indexOf('?>', lt) + 2; continue; }
-    if (text.startsWith('<!--', lt)) { i = text.indexOf('-->', lt) + 3; continue; }
+    // 閉じていない記述は壊れたファイルとしてエラーにする（無限ループ防止）
+    const find = (str, from) => { const k = text.indexOf(str, from); if (k === -1) throw new Error('XML の形式が正しくありません'); return k; };
+    if (text.startsWith('<?', lt)) { i = find('?>', lt) + 2; continue; }
+    if (text.startsWith('<!--', lt)) { i = find('-->', lt) + 3; continue; }
     if (text.startsWith('<![CDATA[', lt)) {
-      const end = text.indexOf(']]>', lt);
+      const end = find(']]>', lt);
       stack[stack.length - 1].children.push(text.slice(lt + 9, end));
       i = end + 3;
       continue;
     }
-    if (text.startsWith('<!', lt)) { i = text.indexOf('>', lt) + 1; continue; }
+    if (text.startsWith('<!', lt)) { i = find('>', lt) + 1; continue; }
     if (text[lt + 1] === '/') {
-      const gt = text.indexOf('>', lt);
+      const gt = find('>', lt);
       if (stack.length > 1) stack.pop();
       i = gt + 1;
       continue;
@@ -70,12 +72,14 @@ export function parseXml(src) {
     // 開始タグ
     let j = lt + 1;
     while (j < n && !/[\s/>]/.test(text[j])) j++;
+    if (j >= n) throw new Error('XML の形式が正しくありません');
     const qname = text.slice(lt + 1, j);
     const rawAttrs = {};
     let selfClose = false;
     while (j < n) {
       while (j < n && /\s/.test(text[j])) j++;
-      if (text[j] === '/') { selfClose = true; j = text.indexOf('>', j) + 1; break; }
+      if (j >= n) throw new Error('XML の形式が正しくありません');
+      if (text[j] === '/') { selfClose = true; j = find('>', j) + 1; break; }
       if (text[j] === '>') { j++; break; }
       let k = j;
       while (k < n && !/[\s=/>]/.test(text[k])) k++;
@@ -85,7 +89,8 @@ export function parseXml(src) {
         k++;
         while (k < n && /\s/.test(text[k])) k++;
         const q = text[k];
-        const end = text.indexOf(q, k + 1);
+        if (q !== '"' && q !== "'") throw new Error('XML の形式が正しくありません');
+        const end = find(q, k + 1);
         rawAttrs[an] = decodeEntities(text.slice(k + 1, end));
         j = end + 1;
       } else {
@@ -109,6 +114,8 @@ export function parseXml(src) {
     if (!selfClose) stack.push(el);
     i = j;
   }
+  // 閉じられていない要素が残っていれば、途中で切れたファイル
+  if (stack.length > 1) throw new Error('XML の形式が正しくありません（途中で終わっています）');
   const top = root.children.find((c) => typeof c !== 'string');
   if (!top) throw new Error('XML の形式が正しくありません');
   return top;

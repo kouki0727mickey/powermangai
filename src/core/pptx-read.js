@@ -365,6 +365,7 @@ class SlideReader {
     const text = this.readTxBody(kid(el, 'p:txBody'), ph, inh, fontRefColor?.value, type);
     const obj = createObject(type, {
       ...geo,
+      hidden: cNvPr?.attrs.hidden === '1' || cNvPr?.attrs.hidden === 'true',
       name: cNvPr?.attrs.name || '',
       fill: fill ? fill.value : null,
       opacity: fill?.alpha ?? 1,
@@ -450,7 +451,7 @@ class SlideReader {
     const lnEl = kid(spPr, 'a:ln');
     const stroke = lnEl ? readFill(lnEl, this.theme) : null;
     const obj = createObject('image', {
-      ...geo, name: cNvPr?.attrs.name || '', src: `data:${mime};base64,${toBase64(data)}`, fill: null,
+      ...geo, name: cNvPr?.attrs.name || '', hidden: cNvPr?.attrs.hidden === '1', src: `data:${mime};base64,${toBase64(data)}`, fill: null,
       stroke: stroke ? stroke.value : null, strokeWidth: lnEl?.attrs.w ? pt(lnEl.attrs.w) : 0, lockAspect: true, groupId: groupId || null,
       shadow: !!xpath(spPr, 'a:effectLst/a:outerShdw'),
     });
@@ -479,7 +480,7 @@ class SlideReader {
     if (merged) this.ctx.warn('結合したセル（結合せずに読み込みました）');
     const tblPr = kid(tbl, 'a:tblPr');
     const obj = createObject('table', {
-      ...geo, name: cNvPr?.attrs.name || '', fill: null, stroke: null, colWidths, cells,
+      ...geo, name: cNvPr?.attrs.name || '', hidden: cNvPr?.attrs.hidden === '1', fill: null, stroke: null, colWidths, cells,
       rowHeights: rowsEl.map((tr) => Math.max(8, pt(tr.attrs.h || 370840))),
       headerRow: tblPr?.attrs.firstRow === '1', bandedRows: tblPr?.attrs.bandRow === '1', groupId: groupId || null,
     });
@@ -522,21 +523,30 @@ function readBackground(el, theme) {
   return undefined;
 }
 
+const TRANS_TYPES = { fade: 'fade', push: 'push', wipe: 'wipe', split: 'split', cover: 'cover', pull: 'uncover', zoom: 'zoom' };
+
 function readTransition(sld) {
-  let tr = kid(sld, 'p:transition');
-  if (!tr) {
-    for (const alt of kids(sld, 'mc:AlternateContent')) {
-      tr = kid(kid(alt, 'mc:Fallback'), 'p:transition') || kid(kid(alt, 'mc:Choice'), 'p:transition');
-      if (tr) break;
-    }
+  // PowerPoint 2010 以降は mc:AlternateContent の Choice（p14:dur で正確な時間）と Fallback の両方を書く
+  const candidates = [kid(sld, 'p:transition')];
+  for (const alt of kids(sld, 'mc:AlternateContent')) {
+    candidates.push(kid(kid(alt, 'mc:Choice'), 'p:transition'), kid(kid(alt, 'mc:Fallback'), 'p:transition'));
   }
-  if (!tr) return null;
-  const child = kids(tr)[0];
-  if (!child) return null;
-  const name = child.name.split(':').pop();
-  const type = { fade: 'fade', push: 'push', wipe: 'wipe', split: 'split', cover: 'cover', pull: 'uncover', zoom: 'zoom' }[name] || 'fade';
-  const dur = Number(tr.attrs['p14:dur']) / 1000 || { fast: 0.5, med: 0.75, slow: 1 }[tr.attrs.spd] || 0.7;
-  return { type, duration: dur, direction: TRANS_DIR_IN[child.attrs.dir] };
+  const trs = candidates.filter(Boolean);
+  if (!trs.length) return null;
+  // 種類は対応している効果の要素から（Choice の p14 独自の効果なら Fallback の効果を使う）
+  let type = null;
+  let dir;
+  for (const tr of trs) {
+    const child = kids(tr).find((c) => TRANS_TYPES[c.name.split(':').pop()] && c.name.startsWith('p:'));
+    if (child) { type = TRANS_TYPES[child.name.split(':').pop()]; dir = TRANS_DIR_IN[child.attrs.dir]; break; }
+  }
+  if (!type) {
+    if (!trs.some((tr) => kids(tr).length)) return null;
+    type = 'fade';
+  }
+  const exact = trs.map((tr) => Number(tr.attrs['p14:dur'])).find((v) => v > 0);
+  const duration = exact ? exact / 1000 : { fast: 0.5, med: 0.75, slow: 1 }[trs[0].attrs.spd] || 0.7;
+  return { type, duration, direction: dir };
 }
 
 /** p:timing の開始効果（クリック時 / 同時 / 後）を読む */

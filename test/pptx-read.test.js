@@ -41,7 +41,7 @@ test('書き出して読み込むと主な内容が保たれる（往復）', as
   const arrow = s2.objects.find((o) => o.type === 'arrow');
   assert.deepEqual([arrow.stroke, arrow.strokeWidth, arrow.dash], ['@accent6', 3, 'dash']);
   assert.ok(s2.objects.some((o) => o.type === 'star'));
-  assert.deepEqual(s2.transition, { type: 'push', duration: 0.75, direction: 'fromLeft' });
+  assert.deepEqual(s2.transition, { type: 'push', duration: 0.7, direction: 'fromLeft' }, '正確な時間（p14:dur）');
   const byId = (id) => s2.objects.find((o) => o.id === id);
   assert.deepEqual(s2.animations.map((a) => [a.effect, a.trigger, a.duration, a.direction, byId(a.target)?.type]), [
     ['fade', 'click', 0.5, undefined, 'roundRect'], ['flyIn', 'after', 1, 'fromLeft', 'text'], ['wipe', 'click', 0.5, 'fromTop', 'text'], ['zoom', 'with', 0.5, undefined, 'star'],
@@ -173,4 +173,21 @@ test('LibreOffice が保存し直した .pptx を読み込める', { skip: !hasS
   // LibreOffice がアニメーションを読み取って保存し直しても、効果とタイミングが残る
   assert.deepEqual(pres.slides[1].animations.map((a) => [a.effect, a.trigger]), [['fade', 'click'], ['flyIn', 'after'], ['wipe', 'click'], ['zoom', 'with']]);
   console.log('LibreOffice 版の警告:', warnings);
+});
+
+test('非表示の図形は非表示のまま保存・読み込みされる', async () => {
+  const { pres: src } = samplePresentation();
+  const star = src.slides[1].objects.find((o) => o.type === 'star');
+  star.hidden = true;
+  const { pres } = await importPptx(await exportPptx(src));
+  assert.equal(pres.slides[1].objects.find((o) => o.type === 'star').hidden, true);
+});
+
+test('PowerPoint 2010 形式の画面切り替え（Choice の p14 独自の効果と正確な時間）', async () => {
+  const { buildPptxFiles } = await import('../src/core/pptx-write.js');
+  const { writeZip } = await import('../src/core/zip.js');
+  const files = buildPptxFiles(samplePresentation().pres);
+  files['ppt/slides/slide1.xml'] = files['ppt/slides/slide1.xml'].replace('</p:clrMapOvr>', '</p:clrMapOvr><mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" Requires="p14"><p:transition spd="slow" p14:dur="2000"><p14:vortex dir="r"/></p:transition></mc:Choice><mc:Fallback><p:transition spd="slow"><p:wipe dir="r"/></p:transition></mc:Fallback></mc:AlternateContent>');
+  const { pres } = await importPptx(await writeZip(files));
+  assert.deepEqual(pres.slides[0].transition, { type: 'wipe', duration: 2, direction: 'fromLeft' });
 });
