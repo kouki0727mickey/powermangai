@@ -28,6 +28,9 @@ import { importPptx } from '../core/pptx-read.js';
 import { exportPptx } from '../core/pptx-write.js';
 import { tableLayout, CELL_INSET, cellDisplayFont } from '../core/table.js';
 import { CHART_KINDS, CHART_PALETTES, MAX_CATEGORIES, MAX_SERIES, defaultChartTitle } from '../core/chart.js';
+import {
+  outlineLines, lineIndex, setLineText, splitLine, demoteLine, promoteLine, joinWithPrevious, moveLine, SOFT_BREAK,
+} from '../core/outline.js';
 
 const FONT_FAMILIES = ['+major', '+minor', 'Yu Gothic UI', '游ゴシック', 'メイリオ', 'MS ゴシック', 'MS 明朝', 'BIZ UDPゴシック', 'Arial', 'Segoe UI', 'Times New Roman', 'Consolas'];
 const LINE_SPACINGS = [1, 1.5, 2, 2.5, 3];
@@ -124,7 +127,8 @@ rich.onChange = (paras) => editor.previewEdit(paras);
 function layout() {
   $('center').hidden = app.view === 'sorter';
   $('sorter').hidden = app.view !== 'sorter';
-  $('thumbs').hidden = app.view === 'sorter';
+  $('thumbs').hidden = app.view !== 'normal';
+  $('outline').hidden = app.view !== 'outline';
   $('notes-pane').hidden = !app.showNotes;
   const stage = $('stage');
   const { width: SW, height: SH } = editor.size;
@@ -169,6 +173,7 @@ function render() {
   renderNotes();
   scrollSelectionIntoView();
   renderThumbs();
+  renderOutline();
   renderTextEditor();
   renderStatus();
   renderPractice();
@@ -238,8 +243,169 @@ function renderTextEditor() {
 /** ダイアログやスライドショーが無いときは常に編集用要素にフォーカスを置く（IME の入力を受け取るため） */
 function focusSink() {
   if (activeDialog() || app.show) return;
-  const target = editor.pane === 'notes' ? notesEl : rich.el;
+  const target = editor.pane === 'notes' ? notesEl : editor.pane === 'outline' && outlineState.input ? outlineState.input : rich.el;
   if (document.activeElement !== target) target.focus({ preventScroll: true });
+}
+
+// ---------------------------------------------------------------- アウトライン表示
+const outlineEl = $('outline');
+/** ref: 編集中の行（{ slideId, kind, para }）、input: その入力欄、caret: 次に描画するときのカーソル位置 */
+const outlineState = { ref: null, input: null, caret: null, dirty: false };
+
+const refOf = (l) => ({ slideId: l.slideId, kind: l.kind, para: l.para });
+
+/**
+ * 編集中の行の文字をモデルに反映。live（入力のたび）なら同じ行への続けての入力を 1 回の操作にまとめる。
+ */
+function commitOutline(live = false) {
+  const { ref, input } = outlineState;
+  outlineState.dirty = false;
+  if (!ref || !input) return;
+  const lines = outlineLines(editor.pres, ref);
+  const line = lines[lineIndex(lines, ref)];
+  if (!line || line.text === input.value) return;
+  outlineState.caret = input.selectionStart;
+  const key = live ? `${ref.slideId}:${ref.kind}:${ref.para}` : null;
+  editor.outlineEdit((p) => (setLineText(p, ref, input.value) ? ref : null), key);
+}
+
+function renderOutline() {
+  if (app.view !== 'outline') { outlineState.input = null; outlineState.sig = null; return; }
+  const lines = outlineLines(editor.pres, outlineState.ref);
+  let i = outlineState.ref ? lineIndex(lines, outlineState.ref) : -1;
+  // 他の操作で現在のスライドが変わったら、そのスライドのタイトルへ
+  if (i < 0 || lines[i].slideIndex !== editor.slideIndex) {
+    i = Math.max(0, lines.findIndex((l) => l.slideIndex === editor.slideIndex));
+    outlineState.caret = null;
+  }
+  const prev = outlineState.ref;
+  outlineState.ref = refOf(lines[i]);
+  // まだ反映していない入力（別の理由で描き直すとき）は残す
+  const same = prev && prev.slideId === outlineState.ref.slideId && prev.kind === outlineState.ref.kind && prev.para === outlineState.ref.para;
+  const pending = outlineState.dirty && same && outlineState.input ? outlineState.input.value : null;
+  if (!same) outlineState.dirty = false;
+  // 構成と他の行が変わっていなければ描き直さない（入力中の IME を壊さないため）
+  const sig = JSON.stringify([i, lines.map((l, k) => (k === i ? [l.kind, l.level, l.slideIndex] : [l.kind, l.level, l.slideIndex, l.text]))]);
+  if (sig === outlineState.sig && outlineState.input && outlineEl.contains(outlineState.input)) {
+    const l = lines[i];
+    if (!outlineState.dirty && outlineState.input.value !== l.text) outlineState.input.value = l.text;
+    outlineState.caret = null;
+    outlineEl.classList.toggle('pane-focus', editor.pane === 'outline');
+    if (editor.pane === 'outline' && !activeDialog() && !app.show && document.activeElement !== outlineState.input) outlineState.input.focus({ preventScroll: true });
+    return;
+  }
+  outlineState.sig = sig;
+  const hadFocus = document.activeElement === outlineState.input;
+  const keepCaret = outlineState.caret ?? (hadFocus ? outlineState.input.selectionStart : null);
+  outlineEl.textContent = '';
+  lines.forEach((l, k) => {
+    const row = h('div', { class: `ol-line ${l.kind}${k === i ? ' current' : ''}` });
+    if (l.kind === 'title') row.append(h('span', { class: 'ol-num', text: String(l.slideIndex + 1) }), h('span', { class: 'ol-icon' }));
+    else {
+      row.style.paddingLeft = `${34 + l.level * 18}px`;
+      row.append(h('span', { class: 'ol-bullet', text: '•' }));
+    }
+    if (k === i) {
+      const input = h('input', { type: 'text', 'aria-label': l.kind === 'title' ? `スライド ${l.slideIndex + 1} のタイトル` : '本文' });
+      input.value = pending ?? l.text;
+      // 入力のたびにスライドへ反映する（IME の変換中は確定してから）
+      input.addEventListener('input', (ev) => { outlineState.dirty = true; if (!ev.isComposing) commitOutline(true); });
+      input.addEventListener('compositionend', () => commitOutline(true));
+      outlineState.input = input;
+      row.append(input);
+    } else row.append(h('span', { class: 'ol-text', text: l.text || (l.kind === 'title' ? '　' : '') }));
+    outlineEl.append(row);
+  });
+  const input = outlineState.input;
+  const caret = Math.min(keepCaret ?? input.value.length, input.value.length);
+  outlineState.caret = null;
+  if (editor.pane === 'outline' && !activeDialog() && !app.show) {
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(caret, caret);
+  }
+  input.scrollIntoView({ block: 'nearest' });
+  outlineEl.classList.toggle('pane-focus', editor.pane === 'outline');
+}
+
+/** 行を移る（to: 行の番号）。caret は移った先のカーソル位置 */
+function gotoOutlineLine(to, caret = null) {
+  commitOutline();
+  const lines = outlineLines(editor.pres, outlineState.ref);
+  const l = lines[Math.max(0, Math.min(lines.length - 1, to))];
+  outlineState.ref = refOf(l);
+  outlineState.caret = caret;
+  if (l.slideIndex !== editor.slideIndex) editor.gotoSlide(l.slideIndex); else render();
+}
+
+/** アウトラインの構造の操作（op(pres, ref) は outline.js の操作） */
+function outlineOp(op, caret = 0) {
+  commitOutline();
+  const r = editor.outlineEdit((p) => op(p, outlineState.ref));
+  if (!r) return false;
+  if (r.error) { setStatus(r.error); return false; }
+  outlineState.ref = r.ref || r;
+  outlineState.caret = r.caret ?? caret;
+  render();
+  return true;
+}
+
+function handleOutlineKey(e) {
+  const input = outlineState.input;
+  if (!input) return;
+  const lines = outlineLines(editor.pres, outlineState.ref);
+  const i = lineIndex(lines, outlineState.ref);
+  const mods = e.ctrlKey || e.metaKey || e.altKey;
+  const collapsed = input.selectionStart === input.selectionEnd;
+  const log = (label) => logKey(eventKeyText(e), label);
+  if (e.altKey && e.shiftKey && !e.ctrlKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    e.preventDefault();
+    const dir = e.key === 'ArrowUp' ? -1 : 1;
+    if (outlineOp((p, ref) => moveLine(p, ref, dir), input.selectionStart)) log(dir < 0 ? '上へ移動' : '下へ移動');
+    return;
+  }
+  if (e.ctrlKey && (e.key === 'Home' || e.key === 'End')) { e.preventDefault(); gotoOutlineLine(e.key === 'Home' ? 0 : lines.length - 1); return; }
+  if (mods) return; // その他の Ctrl / Alt の組み合わせは入力欄の既定の動作（単語単位の移動など）
+  switch (e.key) {
+    case 'ArrowUp': case 'ArrowDown':
+      e.preventDefault();
+      gotoOutlineLine(i + (e.key === 'ArrowUp' ? -1 : 1), input.selectionStart);
+      return;
+    case 'PageUp': case 'PageDown': {
+      e.preventDefault();
+      const target = editor.slideIndex + (e.key === 'PageUp' ? -1 : 1);
+      const k = lines.findIndex((l) => l.slideIndex === target);
+      if (k >= 0) gotoOutlineLine(k);
+      return;
+    }
+    case 'Enter':
+      e.preventDefault();
+      if (e.shiftKey) { input.setRangeText(SOFT_BREAK, input.selectionStart, input.selectionEnd, 'end'); commitOutline(true); return; }
+      if (outlineOp((p, ref) => splitLine(p, ref, input.selectionStart))) log(outlineState.ref.kind === 'title' ? '新しいスライド' : '新しい段落');
+      return;
+    case 'Tab':
+      e.preventDefault();
+      if (outlineOp(e.shiftKey ? promoteLine : demoteLine, input.selectionStart)) log(e.shiftKey ? 'レベルを上げる' : 'レベルを下げる');
+      return;
+    case 'Backspace':
+      if (collapsed && input.selectionStart === 0 && i > 0) {
+        e.preventDefault();
+        if (outlineOp(joinWithPrevious)) log('前の行とつなぐ');
+      }
+      return;
+    case 'Delete':
+      if (collapsed && input.selectionStart === input.value.length && i < lines.length - 1) {
+        e.preventDefault();
+        commitOutline();
+        const next = refOf(outlineLines(editor.pres, outlineState.ref)[i + 1]);
+        if (outlineOp((p) => joinWithPrevious(p, next))) log('次の行とつなぐ');
+      }
+      return;
+    case 'Escape':
+      e.preventDefault();
+      commitOutline();
+      return;
+    default:
+  }
 }
 
 // ---------------------------------------------------------------- ノート・スライド一覧表示
@@ -358,8 +524,9 @@ function sorterVertical(dir) {
 function setView(view) {
   commitEdit();
   leaveNotes();
+  if (editor.pane === 'outline') commitOutline();
   app.view = view;
-  editor.pane = view === 'sorter' ? 'sorter' : 'editor';
+  editor.pane = view === 'sorter' ? 'sorter' : view === 'outline' ? 'outline' : 'editor';
   editor.selection = [];
   layout();
 }
@@ -1104,6 +1271,7 @@ const ACTIONS = {
   // 表示
   viewNormal: () => setView('normal'),
   viewSorter: () => setView('sorter'),
+  viewOutline: () => setView('outline'),
   readingView: () => startShow(editor.slideIndex, { windowed: true }),
   toggleNotes: () => {
     if (app.showNotes && editor.pane === 'notes') leaveNotes();
@@ -1558,7 +1726,8 @@ async function inputDimension(prop, label) {
 function togglePane(dir = 1) {
   if (app.view === 'sorter') return;
   commitEdit();
-  const order = ['slides', 'editor', ...(app.showNotes ? ['notes'] : [])];
+  if (editor.pane === 'outline') commitOutline();
+  const order = [app.view === 'outline' ? 'outline' : 'slides', 'editor', ...(app.showNotes ? ['notes'] : [])];
   const i = Math.max(0, order.indexOf(editor.pane));
   const next = order[(i + dir + order.length) % order.length];
   leaveNotes();
@@ -1623,6 +1792,7 @@ async function runAction(action, args, { keys = '', label = '', repeat = false }
   if (!fn) { setStatus(`未対応の操作です: ${action}`); return false; }
   // ノート欄で使えない操作（図形の挿入など）は編集領域に戻ってから実行
   if (editor.pane === 'notes' && !NOTES_KEEP.has(action)) { leaveNotes(); render(); }
+  if (editor.pane === 'outline') commitOutline();
   // 表のセルを編集中だった場合、そのセルを行・列の操作の基準にする
   app.actionCell = editor.editingCell ? { id: editor.editingId, ...editor.editingCell } : null;
   if (editor.editingId && !TEXT_KEEP.has(action)) commitEdit();
@@ -2206,6 +2376,8 @@ function onKeyDown(e) {
     runAction(binding.action, undefined, { keys: prettyKey(candidates.find((c) => binding.keys.includes(c)) || candidates[0]), label: binding.label });
     return;
   }
+
+  if (ctx === 'outline') { handleOutlineKey(e); return; }
 
   if (ctx === 'notes') {
     // ノート欄: 文字入力はそのまま。Tab はフォーカス移動ではなくタブ文字

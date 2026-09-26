@@ -3,7 +3,7 @@
 const E = ['editor'];
 const ES = ['editor', 'slides', 'sorter'];
 const S = ['slides', 'sorter'];
-const ALL = ['editor', 'slides', 'sorter', 'text', 'notes'];
+const ALL = ['editor', 'slides', 'sorter', 'text', 'notes', 'outline'];
 
 export const BINDINGS = [
   // ファイル
@@ -15,8 +15,8 @@ export const BINDINGS = [
   { action: 'closeWindow', keys: ['Ctrl+W', 'Ctrl+F4'], contexts: ALL, category: 'ファイル', label: '閉じる' },
 
   // 共通編集
-  { action: 'undo', keys: ['Ctrl+Z'], contexts: ES, category: '編集', label: '元に戻す' },
-  { action: 'redo', keys: ['Ctrl+Y', 'F4'], contexts: ES, category: '編集', label: 'やり直し / 繰り返し' },
+  { action: 'undo', keys: ['Ctrl+Z'], contexts: [...ES, 'outline'], category: '編集', label: '元に戻す' },
+  { action: 'redo', keys: ['Ctrl+Y', 'F4'], contexts: [...ES, 'outline'], category: '編集', label: 'やり直し / 繰り返し' },
   { action: 'copy', keys: ['Ctrl+C', 'Ctrl+Insert'], contexts: ES, category: '編集', label: 'コピー' },
   { action: 'cut', keys: ['Ctrl+X', 'Shift+Delete'], contexts: ES, category: '編集', label: '切り取り' },
   { action: 'paste', keys: ['Ctrl+V', 'Shift+Insert'], contexts: ES, category: '編集', label: '貼り付け' },

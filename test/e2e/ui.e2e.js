@@ -1303,3 +1303,63 @@ test('コメントの削除は選択中の図形のコメント、次のコメ�
   assert.match(await page.textContent('.comments'), /S3/);
   await keys('Escape');
 });
+
+test('アウトライン表示（Alt → W → P → O）: 入力・Enter で新しいスライド・Tab / Shift+Tab・元に戻す', async () => {
+  await fresh();
+  await alt('w', 'p', 'o');
+  assert.equal(await page.isVisible('#outline'), true);
+  assert.equal(await page.isVisible('#thumbs'), false);
+  const outline = () => page.$$eval('#outline .ol-line', (els) => els.map((el) => {
+    const input = el.querySelector('input');
+    const lead = el.classList.contains('title') ? 'T' : `B${Math.round((parseFloat(el.style.paddingLeft) - 34) / 18)}`;
+    return `${lead}:${input ? input.value : el.querySelector('.ol-text').textContent.trim()}`;
+  }));
+  await page.keyboard.type('年間計画');
+  await keys('Enter'); // 新しいスライド
+  await page.keyboard.type('目標');
+  await keys('Enter', 'Tab'); // 新しいスライドのタイトル → 前のスライドの本文
+  await page.keyboard.type('売上');
+  await keys('Enter', 'Tab');
+  await page.keyboard.type('前年比 110%');
+  await keys('Enter', 'Shift+Tab');
+  await page.keyboard.type('利益');
+  assert.deepEqual(await outline(), ['T:年間計画', 'T:目標', 'B0:売上', 'B1:前年比 110%', 'B0:利益']);
+  // スライドにも反映される（行を移ると確定）
+  await keys('ArrowUp');
+  const slide1 = await ed(() => __pmg.editor.pres.slides[1].objects.map((o) => __pmg.text(o)));
+  assert.deepEqual(slide1, ['目標', '売上\n前年比 110%\n利益']);
+  assert.equal(await ed(() => __pmg.editor.pres.slides.length), 2);
+  // 本文レベル 0 を Shift+Tab → 新しいスライド
+  await keys('ArrowDown', 'Shift+Tab');
+  assert.deepEqual(await outline(), ['T:年間計画', 'T:目標', 'B0:売上', 'B1:前年比 110%', 'T:利益']);
+  assert.equal(await ed(() => __pmg.editor.slideIndex), 2, '現在のスライドも移る');
+  // Alt+Shift+↑ でスライドを上へ
+  await keys('Alt+Shift+ArrowUp');
+  assert.deepEqual(await outline(), ['T:年間計画', 'T:利益', 'T:目標', 'B0:売上', 'B1:前年比 110%']);
+  // 元に戻す（Ctrl+Z）
+  await keys('Control+z', 'Control+z');
+  assert.deepEqual(await outline(), ['T:年間計画', 'T:目標', 'B0:売上', 'B1:前年比 110%', 'B0:利益']);
+  // 標準表示に戻る
+  await alt('w', 'l');
+  assert.equal(await page.isVisible('#thumbs'), true);
+  assert.equal(await page.isVisible('#outline'), false);
+  assert.deepEqual(errors, []);
+});
+
+test('アウトライン: 入力はすぐスライドに反映、続けて入力した文字は 1 回で元に戻る、入力欄は作り直さない', async () => {
+  await fresh();
+  await alt('w', 'p', 'o');
+  await ed(() => { window.__olInput = document.querySelector('#outline input'); });
+  await page.keyboard.type('四半期');
+  assert.equal(await ed(() => __pmg.text(__pmg.editor.slide.objects[0])), '四半期', 'すぐ反映');
+  assert.equal(await ed(() => document.querySelector('#outline input') === window.__olInput), true, '同じ入力欄のまま');
+  assert.equal(await ed(() => document.activeElement === window.__olInput), true);
+  await keys('Control+z');
+  assert.equal(await ed(() => __pmg.text(__pmg.editor.slide.objects[0])), '');
+  assert.equal(await ed(() => document.querySelector('#outline input').value), '', '元に戻すと入力欄も戻る');
+  // 段落内の改行（Shift+Enter）
+  await page.keyboard.type('A');
+  await keys('Shift+Enter');
+  await page.keyboard.type('B');
+  assert.equal(await ed(() => __pmg.text(__pmg.editor.slide.objects[0])), 'A\nB');
+});

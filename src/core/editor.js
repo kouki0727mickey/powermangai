@@ -70,6 +70,7 @@ export class Editor {
 
   /** プレゼンテーションを変更する操作。変化があった場合だけ履歴に積む。 */
   mutate(fn) {
+    this.outlineMergeKey = null;
     const before = this.snapshot();
     const presBefore = JSON.stringify(this.pres);
     const result = fn();
@@ -115,6 +116,7 @@ export class Editor {
   }
 
   undo() {
+    this.outlineMergeKey = null;
     if (this.undoStack.length === 0) return false;
     this.redoStack.push(this.snapshot());
     this.restore(this.undoStack.pop());
@@ -123,6 +125,7 @@ export class Editor {
   }
 
   redo() {
+    this.outlineMergeKey = null;
     if (this.redoStack.length === 0) return false;
     this.undoStack.push(this.snapshot());
     this.restore(this.redoStack.pop());
@@ -1375,6 +1378,30 @@ export class Editor {
       return all[k];
     }
     return all[(k + dir + all.length) % all.length];
+  }
+
+  // ---- アウトライン表示 ----
+  /**
+   * アウトラインの編集（fn(pres) は outline.js の操作）。1 回の操作として履歴に積み、
+   * 結果の行のスライドを現在のスライドにする。
+   */
+  outlineEdit(fn, mergeKey = null) {
+    let result = null;
+    // 同じ行への続けての入力（mergeKey が同じ）は 1 回の操作にまとめる
+    const merge = mergeKey && mergeKey === this.outlineMergeKey;
+    const depth = this.undoStack.length;
+    this.mutate(() => {
+      result = fn(this.pres);
+      const id = result && !result.error ? (result.ref || result).slideId : null;
+      const i = id ? this.pres.slides.findIndex((sl) => sl.id === id) : -1;
+      this.slideIndex = i >= 0 ? i : Math.min(this.slideIndex, this.pres.slides.length - 1);
+      this.selection = [];
+      this.editingId = null;
+      this.clearSlideSelection();
+    });
+    if (merge && this.undoStack.length === depth + 1) this.undoStack.pop();
+    this.outlineMergeKey = mergeKey;
+    return result;
   }
 }
 

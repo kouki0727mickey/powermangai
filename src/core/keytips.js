@@ -267,6 +267,7 @@ export const KEYTIPS = {
       children: [
         { key: 'L', label: '標準', action: 'viewNormal' },
         { key: 'I', label: 'スライド一覧', action: 'viewSorter' },
+        { key: 'PO', label: 'アウトライン表示', action: 'viewOutline' },
         { key: 'D', label: '閲覧表示', action: 'readingView' },
         { key: 'N', label: 'ノート（ノート欄の表示 / 非表示）', action: 'toggleNotes' },
         { key: 'Q', label: 'ズーム', action: 'zoom' },
