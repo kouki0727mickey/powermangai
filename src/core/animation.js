@@ -20,6 +20,9 @@ export const EFFECTS = [
   { id: 'floatIn', label: 'フロートイン' },
 ];
 
+/** 効果の既定の継続時間（秒） */
+export function defaultDuration(effect) { return effect === 'appear' ? 0.01 : 0.5; }
+
 export const DIRECTION_LABELS = { fromBottom: '下から', fromTop: '上から', fromLeft: '左から', fromRight: '右から' };
 export const TRIGGER_LABELS = { click: 'クリック時', with: '直前の動作と同時', after: '直前の動作の後' };
 
@@ -102,11 +105,21 @@ export function objectStyler(slide, steps, done, playing, t, size) {
   const stepOf = new Map();
   steps.forEach((st, si) => st.items.forEach((it) => stepOf.set(it.anim.target, { si, it })));
   const byId = new Map(slide.objects.map((o) => [o.id, o]));
-  // グループは先頭のメンバーのアニメーションに従う
+  // グループは先頭のメンバーのアニメーションに従い、効果の範囲はグループ全体の外接矩形
   const groupAnim = new Map();
+  const groupBox = new Map();
   for (const o of slide.objects) {
     if (o.groupId && stepOf.has(o.id) && !groupAnim.has(o.groupId)) groupAnim.set(o.groupId, stepOf.get(o.id));
+    if (o.groupId) {
+      const b = groupBox.get(o.groupId);
+      if (!b) groupBox.set(o.groupId, { x: o.x, y: o.y, x2: o.x + o.w, y2: o.y + o.h });
+      else Object.assign(b, { x: Math.min(b.x, o.x), y: Math.min(b.y, o.y), x2: Math.max(b.x2, o.x + o.w), y2: Math.max(b.y2, o.y + o.h) });
+    }
   }
+  const geometry = (o) => {
+    const b = o.groupId && groupBox.get(o.groupId);
+    return b ? { x: b.x, y: b.y, w: b.x2 - b.x, h: b.y2 - b.y } : o;
+  };
   return (o) => {
     const entry = stepOf.get(o.id) || (o.groupId ? groupAnim.get(o.groupId) : null);
     if (!entry) return null;
@@ -115,7 +128,7 @@ export function objectStyler(slide, steps, done, playing, t, size) {
     if (si === playing) {
       if (t < it.start) return { hidden: true };
       const p = Math.min(1, (t - it.start) / (it.end - it.start));
-      return effectStyle(it.anim, byId.get(it.anim.target) || o, p, size);
+      return effectStyle(it.anim, geometry(byId.get(it.anim.target) || o), p, size);
     }
     return { hidden: true };
   };

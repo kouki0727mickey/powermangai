@@ -9,6 +9,7 @@ import {
 import { layoutObjectText, approxMeasure } from './textlayout.js';
 import { findTheme } from './colors.js';
 import { replaceAll as replaceAllText, replaceMatch } from './search.js';
+import { defaultDuration } from './animation.js';
 
 export const FONT_SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96];
 const HISTORY_LIMIT = 200;
@@ -938,8 +939,14 @@ export class Editor {
       for (const id of ids) {
         const i = list.findIndex((a) => a.target === id);
         if (!effect) { if (i !== -1) list.splice(i, 1); continue; }
-        if (i !== -1) list[i] = { ...list[i], effect, direction: undefined };
-        else list.push({ target: id, effect, trigger: 'click', duration: effect === 'appear' ? 0.01 : 0.5 });
+        if (i !== -1) {
+          // 継続時間を変えていなければ、新しい効果の既定の時間にする（アピール 0.01 秒のままにならないように）
+          const old = list[i];
+          const duration = old.duration === defaultDuration(old.effect) ? defaultDuration(effect) : old.duration;
+          list[i] = { ...old, effect, duration, direction: undefined };
+        } else {
+          list.push({ target: id, effect, trigger: 'click', duration: defaultDuration(effect) });
+        }
       }
     });
     return true;

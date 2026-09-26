@@ -109,3 +109,20 @@ test('保存データのアニメーションの検証', () => {
   assert.deepEqual(s.animations, [{ target: 'x', effect: 'flyIn', trigger: 'click', duration: 0.5, direction: 'fromLeft' }]);
   assert.ok(EFFECTS.length >= 6);
 });
+
+test('グループの効果の範囲はグループ全体、効果を変えると既定の継続時間になる', () => {
+  const slide = { objects: [{ id: 'a', groupId: 'g', x: 0, y: 0, w: 10, h: 10 }, { id: 'b', groupId: 'g', x: 100, y: 200, w: 10, h: 10 }] };
+  const steps = buildSteps([{ target: 'a', effect: 'wipe', trigger: 'click', duration: 1, direction: 'fromLeft' }]);
+  const st = objectStyler(slide, steps, 0, 0, 1, { width: 960, height: 540 });
+  const clip = st(slide.objects[1]).clip;
+  assert.ok(clip.x + clip.w >= 110 && clip.y + clip.h >= 210, 'ワイプの範囲にグループの他のメンバーも入る');
+  const pres = createPresentation();
+  const e = new Editor(pres);
+  e.insertObject('rect');
+  e.setAnimation('appear');
+  e.setAnimation('fade');
+  assert.equal(e.slide.animations[0].duration, 0.5);
+  e.updateAnimation({ duration: 2 });
+  e.setAnimation('zoom');
+  assert.equal(e.slide.animations[0].duration, 2, '自分で変えた時間は保つ');
+});
