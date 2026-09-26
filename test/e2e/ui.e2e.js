@@ -817,3 +817,15 @@ test('ヘッダーとフッター（Alt → N → H）とレイアウトの変�
   assert.equal(await ed(() => __pmg.text(__pmg.editor.slide.objects[0])), '題');
   assert.deepEqual(errors, []);
 });
+
+test('置換後の文字に検索文字列が含まれていても、同じ箇所を置換し続けない', async () => {
+  await fresh();
+  await ed(() => { const e = __pmg.editor; e.setText(e.slide.objects[0].id, 'cat cat'); });
+  await keys('Control+h');
+  await page.keyboard.type('cat');
+  await keys('Tab');
+  await page.keyboard.type('cats');
+  await keys('Enter', 'Alt+r', 'Alt+r', 'Alt+r');
+  assert.equal(await ed(() => __pmg.text(__pmg.editor.slide.objects[0])), 'cats cats');
+  await keys('Escape');
+});

@@ -93,3 +93,10 @@ export async function writeSystemClipboardText(text) {
     else await navigator.clipboard.writeText(text);
   } catch { /* 書き込めない環境では無視 */ }
 }
+
+/** 印刷用の要素を表示した状態で PDF 保存 / 印刷する */
+export async function printDocument(kind, defaultName) {
+  if (api) return kind === 'pdf' ? api.printToPDF(defaultName) : api.printPaper();
+  window.print();
+  return { path: null };
+}

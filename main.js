@@ -88,6 +88,24 @@ ipcMain.handle('clipboard:writeText', (e, text) => {
   if (typeof text === 'string') clipboard.writeText(text);
 });
 
+// PDF として保存（テスト用に PMG_TEST_PDF_PATH が指定されていればダイアログを出さない）
+ipcMain.handle('print:pdf', async (e, { defaultName }) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  let target = process.env.PMG_TEST_PDF_PATH;
+  if (!target) {
+    const r = await dialog.showSaveDialog(win, { defaultPath: defaultName || 'presentation.pdf', filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+    if (r.canceled || !r.filePath) return null;
+    target = r.filePath;
+  }
+  const data = await e.sender.printToPDF({ printBackground: true, preferCSSPageSize: true, margins: { marginType: 'none' } });
+  await writeFile(target, data);
+  return { path: target };
+});
+
+ipcMain.handle('print:paper', (e) => new Promise((resolve) => {
+  e.sender.print({ printBackground: true }, (ok, reason) => resolve({ ok, reason }));
+}));
+
 ipcMain.handle('window:fullscreen', (e, flag) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   win.setFullScreen(!!flag);

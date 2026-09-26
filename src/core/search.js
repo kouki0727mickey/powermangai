@@ -20,19 +20,26 @@ export function textLocations(pres) {
 /** すべての一致: { slide, objId, cell, from: { p, o }, to: { p, o } }（スライド順・オブジェクト順） */
 export function findAll(pres, query, { matchCase = false } = {}) {
   if (!query) return [];
-  const q = matchCase ? query : query.toLowerCase();
+  // 元の文字列に対して正規表現で探す（小文字化で文字数が変わる文字があっても位置がずれない）
+  const re = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), matchCase ? 'gu' : 'giu');
   const out = [];
-  for (const loc of textLocations(pres)) {
+  textLocations(pres).forEach((loc, li) => {
     loc.paragraphs.forEach((p, pi) => {
-      const t = matchCase ? paraText(p) : paraText(p).toLowerCase();
-      let i = t.indexOf(q);
-      while (i !== -1) {
-        out.push({ slide: loc.slide, objId: loc.obj.id, cell: loc.cell, from: { p: pi, o: i }, to: { p: pi, o: i + query.length } });
-        i = t.indexOf(q, i + Math.max(1, query.length));
+      const t = paraText(p);
+      re.lastIndex = 0;
+      let m;
+      while ((m = re.exec(t)) !== null) {
+        out.push({ slide: loc.slide, loc: li, objId: loc.obj.id, cell: loc.cell, from: { p: pi, o: m.index }, to: { p: pi, o: m.index + m[0].length } });
+        if (m[0].length === 0) re.lastIndex += 1;
       }
     });
-  }
+  });
   return out;
+}
+
+/** 検索結果の並び順での比較（a が b より前なら負） */
+export function compareMatchPos(a, b) {
+  return a.loc - b.loc || a.p - b.p || a.o - b.o;
 }
 
 /** 一致した範囲を置換（書式は一致した先頭の文字のもの） */

@@ -95,3 +95,12 @@ test('すべて置換は書式を保ち、1 回で Undo できる', () => {
   assert.equal(e.replaceAll('x', '', { matchCase: false }), 2);
   assert.equal(objText(e.findObject(id)), 'abc');
 });
+
+test('大文字小文字を区別しない検索は元の文字列の位置を返す（小文字化で長さが変わる文字）', () => {
+  const e = ed();
+  e.setText(e.slide.objects[0].id, 'İstanbul');
+  const m = findAll(e.pres, 'stan')[0];
+  assert.deepEqual([m.from.o, m.to.o], [1, 5]);
+  e.setText(e.slide.objects[0].id, 'a.b a*b');
+  assert.equal(findAll(e.pres, 'a*b').length, 1, '記号は正規表現として扱わない');
+});

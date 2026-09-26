@@ -5,7 +5,7 @@ import {
   isLine, displayName, shapeStyles, LINE_WEIGHTS, createObject, allParas, hasTextContent, SLIDE_SIZES,
 } from '../core/model.js';
 import { findTheme, THEMES } from '../core/colors.js';
-import { findAll } from '../core/search.js';
+import { findAll, compareMatchPos } from '../core/search.js';
 import { keyCandidates, findBinding, prettyKey, MODIFIER_KEYS } from '../core/keys.js';
 import { BINDINGS, MOVE_STEP, bindingsByCategory } from '../core/shortcuts.js';
 import { KeyTipSession, KEYTIPS, keyTipPaths } from '../core/keytips.js';
@@ -17,7 +17,7 @@ import {
   activeDialog, openPalette, openShapeGallery, openGallery, openInput, openList, openConfirm,
   openContent, openHelp, openFontDialog, openSelectionPane, openFormatShape, openTablePicker, openFindReplace, openHeaderFooter, h,
 } from './dialogs.js';
-import { openPresentationFile, savePresentationFile, openImageFile, setFullScreen, readSystemClipboard, writeSystemClipboardText, imageSize } from './platform.js';
+import { openPresentationFile, savePresentationFile, openImageFile, setFullScreen, readSystemClipboard, writeSystemClipboardText, imageSize, printDocument } from './platform.js';
 import { tableLayout, CELL_INSET, cellDisplayFont } from '../core/table.js';
 
 const FONT_FAMILIES = ['+major', '+minor', 'Yu Gothic UI', '游ゴシック', 'メイリオ', 'MS ゴシック', 'MS 明朝', 'BIZ UDPゴシック', 'Arial', 'Segoe UI', 'Times New Roman', 'Consolas'];
@@ -255,7 +255,7 @@ function renderSorter() {
     item.classList.toggle('hidden-slide', !!s.hidden);
     item.querySelector('.num').textContent = String(i + 1);
     const c = item.querySelector('canvas');
-    const key = JSON.stringify(s) + editor.pres.theme + H + i;
+    const key = JSON.stringify(s) + editor.pres.theme + JSON.stringify(editor.pres.headerFooter) + H + i;
     if (sorterCache[i] !== key) {
       c.width = Math.round(240 * dpr); c.height = Math.round(H * dpr);
       c.style.width = '240px'; c.style.height = `${H}px`;
@@ -522,6 +522,18 @@ const ACTIONS = {
       await openContent('エラー', h('p', { text: `ファイルを開けませんでした: ${err.message}` }));
     }
   },
+  print: async () => {
+    const kind = await openList('印刷', [
+      { label: 'PDF として保存', value: 'pdf' },
+      { label: 'プリンターで印刷', value: 'paper' },
+    ]);
+    if (!kind) return;
+    const withHidden = editor.pres.slides.some((sl) => sl.hidden)
+      ? await openList('非表示スライド', [{ label: '非表示スライドを印刷しない', value: false }, { label: '非表示スライドも印刷する', value: true }])
+      : false;
+    if (withHidden === null) return;
+    await printSlides(kind, withHidden);
+  },
   save: () => save(false),
   saveAs: () => save(true),
 
@@ -683,7 +695,7 @@ const ACTIONS = {
   sorterUp: () => editor.gotoSlide(Math.max(0, editor.slideIndex - sorterColumns())),
 
   // スライドショー
-  showFromStart: () => startShow(0),
+  showFromStart: () => startShow(0, { fromStart: true }),
   showFromCurrent: () => startShow(editor.slideIndex),
 
   // ギャラリー / パレット / 入力
@@ -977,6 +989,37 @@ function pasteTextAsBox(text) {
   return true;
 }
 
+/** スライドを画像にして印刷用の要素に並べ、PDF 保存 / 印刷する */
+async function printSlides(kind, withHidden) {
+  commitEdit();
+  const root = $('print-root');
+  const { width: W, height: H } = editor.pres;
+  root.textContent = '';
+  const style = document.createElement('style');
+  // 用紙サイズはスライドと同じ（1pt = 1px の座標なので、インチ = pt / 72）
+  style.textContent = `@page { size: ${W / 72}in ${H / 72}in; margin: 0; }`;
+  root.append(style);
+  editor.pres.slides.forEach((sl, i) => {
+    if (sl.hidden && !withHidden) return;
+    const img = document.createElement('img');
+    img.src = slideToDataUrl(editor.pres, sl, W * 2, H * 2, i);
+    root.append(h('div', { class: 'print-page' }, img));
+  });
+  root.hidden = false;
+  await Promise.all([...root.querySelectorAll('img')].map((img) => (img.complete ? null : new Promise((r) => { img.onload = r; img.onerror = r; }))));
+  try {
+    const base = (app.filePath ? app.filePath.split(/[\\/]/).pop().replace(/\.pmg\.json$|\.json$|\.pptx$/i, '') : 'presentation');
+    const r = await printDocument(kind, `${base}.pdf`);
+    if (r?.path) setStatus(`PDF を保存しました: ${r.path}`);
+    else if (r && r.ok === false && r.reason && r.reason !== 'cancelled') setStatus(`印刷できませんでした: ${r.reason}`);
+  } catch (err) {
+    await openContent('エラー', h('p', { text: `印刷できませんでした: ${err.message}` }));
+  } finally {
+    root.hidden = true;
+    root.textContent = '';
+  }
+}
+
 function chooseLayout(title) {
   const items = LAYOUTS.map(({ id: value, label }) => {
     const c = document.createElement('canvas');
@@ -1017,11 +1060,19 @@ async function findReplace(replace) {
     find,
     replace: (query, repl, opts) => {
       const m = app.findMatch;
-      if (m && findAll(editor.pres, query, opts).some((x) => JSON.stringify(x) === JSON.stringify(m))) {
-        editor.replaceOne(m, repl);
-        app.findState = { ...app.findState, index: app.findState.index - 1 };
+      if (!m || !findAll(editor.pres, query, opts).some((x) => JSON.stringify(x) === JSON.stringify(m))) {
+        return find(query, opts, 1) || '見つかりませんでした';
       }
-      return find(query, opts, 1) || '置換しました。これ以上見つかりません';
+      editor.replaceOne(m, repl);
+      // 置換した文字の後ろから次を探す（置換後の文字に検索文字列が含まれていても繰り返さない）
+      const end = { loc: m.loc, p: m.from.p, o: m.from.o + repl.length };
+      const rest = findAll(editor.pres, query, opts);
+      if (!rest.length) { app.findMatch = null; return '置換しました。これ以上見つかりません'; }
+      const next = rest.findIndex((x) => compareMatchPos({ loc: x.loc, ...x.from }, end) >= 0);
+      // 最後まで置換したら先頭に戻らない（置換後の文字の中の一致を置換し続けないため）
+      if (next === -1) { app.findMatch = null; app.findState = null; return '置換しました。プレゼンテーションの最後まで検索しました'; }
+      app.findState = { query, matchCase: opts.matchCase, index: next - 1 };
+      return find(query, opts, 1);
     },
     replaceAll: (query, repl, opts) => {
       const n = query ? editor.replaceAll(query, repl, opts) : 0;
@@ -1173,11 +1224,11 @@ function visibleSlide(index, dir) {
   return i;
 }
 
-function startShow(from, { windowed = false } = {}) {
+function startShow(from, { windowed = false, fromStart = false } = {}) {
   commitEdit();
   leaveNotes();
   // 最初からのときは非表示スライドを飛ばす（現在のスライドからのときは、そのスライドを表示）
-  const index = from === 0 ? visibleSlide(0, 1) : from;
+  const index = fromStart ? visibleSlide(0, 1) : from;
   app.show = { index, cover: '', digits: '', windowed };
   $('slideshow').hidden = false;
   if (!windowed) setFullScreen(true);
@@ -1544,7 +1595,7 @@ for (const type of ['mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 
 
 // ------------------------------------------------------------------ 起動
 editor.onChange(() => render());
-setImageLoadCallback(() => { thumbCache = []; render(); });
+setImageLoadCallback(() => { thumbCache = []; sorterCache = []; render(); });
 renderRibbon();
 layout();
 renderStats();
