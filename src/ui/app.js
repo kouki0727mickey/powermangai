@@ -27,6 +27,7 @@ import {
 import { importPptx } from '../core/pptx-read.js';
 import { exportPptx } from '../core/pptx-write.js';
 import { tableLayout, CELL_INSET, cellDisplayFont } from '../core/table.js';
+import { objectAt, objectsInRect, handleAt, resizeByHandle, moveLineEnd, rotationFromPoint } from '../core/hittest.js';
 import { CHART_KINDS, CHART_PALETTES, MAX_CATEGORIES, MAX_SERIES, defaultChartTitle } from '../core/chart.js';
 import {
   outlineLines, lineIndex, setLineText, splitLine, demoteLine, promoteLine, joinWithPrevious, moveLine, SOFT_BREAK,
@@ -56,6 +57,7 @@ const app = {
   findState: null,
   showComments: true, // スライド上のコメントのマーカー
   activeComment: null,
+  drag: null, // マウスでのドラッグ中: { mode: 'move' | 'resize' | 'rotate' | 'lineEnd' | 'marquee', ... }
 };
 
 // ---- コメントの作成者（このコンピューターに保存）
@@ -163,6 +165,7 @@ function render() {
   const view = editor.editingCell ? editView() : null;
   drawSelection(overlay.getContext('2d'), slide, editor.selection, overlay.width, overlay.height, {
     editingId: editor.editingId, size: editor.size, cellRect: view, grid: app.grid ? 28.35 : 0, guides: app.guides,
+    dpr: window.devicePixelRatio || 1, marquee: app.drag?.mode === 'marquee' && app.drag.started ? app.drag.rect : null,
   });
   if (app.showComments && slide.comments?.length) {
     const markers = slide.comments.map((c, i) => ({
@@ -633,12 +636,12 @@ function renderRibbon() {
   const activeKey = s && s.stack.length > 1 ? s.path[0] : null;
   for (const t of KEYTIPS.children) {
     if (t.qat) {
-      const q = h('span', { class: 'ribbon-qat', title: t.label, text: { save: '💾', qatUndo: '↶', qatRedo: '↷' }[t.action] || t.label });
+      const q = h('span', { class: 'ribbon-qat', title: t.label, 'data-action': t.action, text: { save: '💾', qatUndo: '↶', qatRedo: '↷' }[t.action] || t.label });
       if (topLevel && t.key.startsWith(s.buffer)) q.append(h('span', { class: 'badge', text: t.key }));
       tabs.append(q);
       continue;
     }
-    const el = h('span', { class: `ribbon-tab${activeKey === t.key ? ' active' : ''}`, text: t.label });
+    const el = h('span', { class: `ribbon-tab${activeKey === t.key ? ' active' : ''}`, 'data-key': t.key, text: t.label });
     if (topLevel && t.key.startsWith(s.buffer)) el.append(h('span', { class: 'badge', text: t.key }));
     tabs.append(el);
   }
@@ -653,7 +656,7 @@ function renderKeytips() {
   box.textContent = '';
   box.append(h('div', { class: 'kt-path', text: `Alt → ${s.path.flatMap((k) => k.split('')).join(' → ')}　${s.stack.slice(1).map((n) => n.label).join(' › ')}` }));
   for (const c of s.visibleTips()) {
-    box.append(h('div', { class: 'kt-item' }, h('span', { class: 'badge', text: c.key }), `${c.label}${c.children ? ' ▸' : ''}`));
+    box.append(h('div', { class: 'kt-item', 'data-key': c.key }, h('span', { class: 'badge', text: c.key }), `${c.label}${c.children ? ' ▸' : ''}`));
   }
   box.append(h('div', { class: 'kt-buffer', text: s.buffer ? `入力中: ${s.buffer}` : 'Esc: 1 つ戻る ／ Alt: 閉じる' }));
 }
@@ -2333,6 +2336,15 @@ function onKeyDown(e) {
   if (e.isComposing || e.keyCode === 229) return;
   if (!MODIFIER_KEYS.has(e.key) && !e.repeat) { app.practice.keys += 1; renderStats(); }
 
+  // マウスでのドラッグ中の Esc は取り消し
+  if (app.drag && e.key === 'Escape') {
+    e.preventDefault();
+    const d = app.drag;
+    app.drag = null;
+    if (d.started && d.mode !== 'marquee') editor.endGesture(true); else render();
+    return;
+  }
+
   // ダイアログはスライドショー中（すべてのスライドの一覧など）にも表示される
   const dlg = activeDialog();
   if (dlg) {
@@ -2449,20 +2461,245 @@ window.addEventListener('keydown', onKeyDown, true);
 window.addEventListener('keyup', onKeyUp, true);
 window.addEventListener('blur', () => { app.altPending = false; });
 
-// ------------------------------------------------------------------ マウス禁止
-for (const type of ['mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 'auxclick', 'wheel', 'dragstart', 'drop', 'dragover']) {
-  window.addEventListener(type, (e) => {
-    // キーボード操作（Space でチェックボックス切り替えなど）で発生する click は detail が 0
-    if ((type === 'click' || type === 'mouseup') && e.detail === 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if (type === 'mousedown') {
-      app.practice.mouse += 1;
-      renderStats();
-      toast('マウスは使えません — ショートカットキーで操作しましょう（F1: 一覧）');
-    }
-  }, { capture: true, passive: false });
+// ------------------------------------------------------------------ マウス
+// キーボードと同じ操作をマウスでもできる（回数は練習の記録として数える）
+window.addEventListener('mousedown', () => { app.practice.mouse += 1; renderStats(); }, { capture: true });
+
+/** マウスの位置 → スライドの座標 */
+function slidePoint(e) {
+  const r = overlay.getBoundingClientRect();
+  return { x: (e.clientX - r.left) / app.scale, y: (e.clientY - r.top) / app.scale };
 }
+
+/** 1 つだけ選択しているとき（グループ以外）はその図形。ハンドルの対象 */
+function handleTarget() {
+  const sel = editor.selectedObjects();
+  return sel.length === 1 && !sel[0].groupId ? sel[0] : null;
+}
+
+const HANDLE_CURSORS = { nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize', rotate: 'grab', start: 'crosshair', end: 'crosshair' };
+
+/** ドラッグを始める準備（少し動かしてから始める。クリックだけなら何もしない） */
+function prepareDrag(e, mode, extra = {}) {
+  const p = slidePoint(e);
+  app.drag = { mode, start: p, sx: e.clientX, sy: e.clientY, started: false, ...extra };
+}
+
+const stageEl = $('stage');
+stageEl.addEventListener('mousedown', (e) => {
+  if (e.button !== 0 || activeDialog() || app.show) return;
+  if (app.keytips) endKeytips();
+  // 編集中の文字の中はブラウザにまかせる（カーソルの移動・範囲選択）
+  if (editor.editingId && $('text-box').contains(e.target)) return;
+  e.preventDefault();
+  if (editor.pane === 'outline') commitOutline();
+  commitEdit();
+  if (editor.pane !== 'editor') { leaveNotes(); editor.pane = 'editor'; }
+  const p = slidePoint(e);
+  const slide = editor.slide;
+  const target = handleTarget();
+  const handle = target && handleAt(target, p.x, p.y, app.scale);
+  if (handle) {
+    prepareDrag(e, handle === 'rotate' ? 'rotate' : handle === 'start' || handle === 'end' ? 'lineEnd' : 'resize', { handle, id: target.id, orig: JSON.parse(JSON.stringify(target)) });
+    render();
+    return;
+  }
+  const hit = objectAt(slide, p.x, p.y, 4 / app.scale);
+  if (hit) {
+    const selected = editor.selection.includes(hit.id);
+    if (e.shiftKey || e.ctrlKey || e.metaKey) { editor.toggleSelect(hit.id, true); return; }
+    if (!selected) editor.setSelection([hit.id]);
+    const origs = new Map(editor.selectedObjects().map((o) => [o.id, { x: o.x, y: o.y }]));
+    prepareDrag(e, 'move', { origs });
+  } else {
+    const keep = e.shiftKey || e.ctrlKey || e.metaKey ? [...editor.selection] : [];
+    if (!keep.length) editor.clearSelection(); else render();
+    prepareDrag(e, 'marquee', { keep, rect: { x1: p.x, y1: p.y, x2: p.x, y2: p.y } });
+  }
+});
+
+window.addEventListener('mousemove', (e) => {
+  const d = app.drag;
+  if (!d) { updateStageCursor(e); return; }
+  if (!d.started) {
+    if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 3) return;
+    d.started = true;
+    if (d.mode !== 'marquee') editor.beginGesture();
+  }
+  const p = slidePoint(e);
+  let dx = p.x - d.start.x, dy = p.y - d.start.y;
+  if (d.mode === 'marquee') {
+    d.rect.x2 = p.x; d.rect.y2 = p.y;
+    render();
+    return;
+  }
+  if (d.mode === 'move') {
+    // Shift: 水平 / 垂直にだけ動かす
+    if (e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
+    editor.updateGesture(() => {
+      for (const o of editor.selectedObjects()) {
+        const orig = d.origs.get(o.id);
+        if (orig) { o.x = Math.round((orig.x + dx) * 10) / 10; o.y = Math.round((orig.y + dy) * 10) / 10; }
+      }
+    });
+    return;
+  }
+  const o = editor.findObject(d.id);
+  if (!o) return;
+  editor.updateGesture(() => {
+    if (d.mode === 'resize') {
+      const keepAspect = e.shiftKey || (d.orig.type === 'image' && d.orig.lockAspect !== false);
+      editor.setBox(o, resizeByHandle(d.orig, d.handle, dx, dy, { keepAspect }));
+    } else if (d.mode === 'lineEnd') {
+      Object.assign(o, moveLineEnd(d.orig, d.handle, p.x, p.y));
+    } else if (d.mode === 'rotate') {
+      o.rotation = rotationFromPoint(d.orig, p.x, p.y, e.shiftKey);
+    }
+  });
+});
+
+window.addEventListener('mouseup', (e) => {
+  const d = app.drag;
+  if (!d || e.button !== 0) return;
+  app.drag = null;
+  if (d.mode === 'marquee') {
+    if (d.started) {
+      const inside = objectsInRect(editor.slide, d.rect).map((o) => o.id);
+      editor.setSelection([...new Set([...d.keep, ...inside])]);
+    }
+    render();
+    return;
+  }
+  if (d.started && editor.endGesture()) setStatus(d.mode === 'move' ? '移動しました' : d.mode === 'rotate' ? '回転しました' : 'サイズを変更しました');
+});
+
+/** マウスの下の図形・ハンドルに合わせてカーソルを変える */
+function updateStageCursor(e) {
+  if (!stageEl.contains(e.target) || activeDialog() || app.show || (editor.editingId && $('text-box').contains(e.target))) return;
+  const p = slidePoint(e);
+  const target = handleTarget();
+  const handle = target && handleAt(target, p.x, p.y, app.scale);
+  const hit = !handle && objectAt(editor.slide, p.x, p.y, 4 / app.scale);
+  stageEl.style.cursor = handle ? HANDLE_CURSORS[handle] : hit ? 'move' : '';
+}
+
+// ダブルクリック: 文字の編集（カーソルはクリックした位置）、グラフはデータの編集
+stageEl.addEventListener('dblclick', (e) => {
+  if (activeDialog() || app.show) return;
+  if (editor.editingId && $('text-box').contains(e.target)) return;
+  const p = slidePoint(e);
+  const hit = objectAt(editor.slide, p.x, p.y, 4 / app.scale);
+  if (!hit) return;
+  editor.setSelection([hit.id]);
+  if (hit.type === 'chart') { runAction('chartData'); return; }
+  if (!editor.canEdit()) return;
+  let cell;
+  if (hit.type === 'table') {
+    // クリックしたセル
+    const lay = tableLayout(hit, measureText, editor.theme);
+    const lx = p.x - hit.x, ly = p.y - hit.y;
+    const c = Math.max(0, lay.xs.findLastIndex((x) => x <= lx));
+    const r = Math.max(0, lay.ys.findLastIndex((y) => y <= ly));
+    cell = { r: Math.min(r, hit.cells.length - 1), c: Math.min(c, hit.cells[0].length - 1) };
+  }
+  beginEdit({ cell });
+  placeCaretAt(e.clientX, e.clientY);
+});
+
+/** 画面の位置に文字のカーソルを置く（編集中の文字の中なら） */
+function placeCaretAt(x, y) {
+  const range = document.caretRangeFromPoint?.(x, y);
+  if (!range || !rich.el.contains(range.startContainer)) return;
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+// スライド一覧: クリックで移動（Shift: 範囲、Ctrl: 追加 / 解除）
+function slidePaneClick(i, e, pane) {
+  if (i < 0) return;
+  commitEdit();
+  if (editor.pane === 'outline') commitOutline();
+  leaveNotes();
+  editor.pane = pane;
+  if (e.shiftKey) editor.selectSlideRange(i);
+  else if (e.ctrlKey || e.metaKey) editor.toggleSlideInSelection(i);
+  else editor.gotoSlide(i);
+  render();
+}
+$('thumbs').addEventListener('mousedown', (e) => {
+  const el = e.target.closest('.thumb');
+  if (!el || e.button !== 0) return;
+  e.preventDefault();
+  slidePaneClick([...$('thumbs').children].indexOf(el), e, 'slides');
+});
+$('sorter').addEventListener('mousedown', (e) => {
+  const el = e.target.closest('.sorter-item');
+  if (!el || e.button !== 0) return;
+  e.preventDefault();
+  slidePaneClick(sorterItems.indexOf(el), e, 'sorter');
+});
+$('sorter').addEventListener('dblclick', (e) => {
+  const el = e.target.closest('.sorter-item');
+  if (!el) return;
+  editor.gotoSlide(sorterItems.indexOf(el));
+  setView('normal');
+});
+
+// アウトライン: クリックした行へ
+outlineEl.addEventListener('mousedown', (e) => {
+  const row = e.target.closest('.ol-line');
+  if (!row || e.button !== 0 || row.querySelector('input')) { if (row) editor.pane = 'outline'; return; }
+  e.preventDefault();
+  editor.pane = 'outline';
+  gotoOutlineLine([...outlineEl.querySelectorAll('.ol-line')].indexOf(row));
+});
+
+// ノート: クリックでノート欄へ
+notesEl.addEventListener('mousedown', () => {
+  if (editor.pane === 'notes') return;
+  commitEdit();
+  if (editor.pane === 'outline') commitOutline();
+  enterNotes();
+});
+
+// リボン: タブをクリックすると、そのタブの KeyTips を開く。項目をクリックで実行
+function pressKeytips(keys) {
+  if (!app.keytips) startKeytips();
+  for (const ch of keys) {
+    if (!app.keytips) return;
+    handleKeytipKey({ key: ch, code: /^[A-Z]$/.test(ch) ? `Key${ch}` : `Digit${ch}`, preventDefault() {} });
+  }
+}
+$('ribbon-tabs').addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  const qat = e.target.closest('.ribbon-qat');
+  if (qat) { e.preventDefault(); if (app.keytips) endKeytips(); runAction(qat.dataset.action); return; }
+  const tab = e.target.closest('.ribbon-tab');
+  if (!tab) return;
+  e.preventDefault();
+  if (app.keytips) endKeytips();
+  pressKeytips(tab.dataset.key);
+});
+$('keytips').addEventListener('mousedown', (e) => {
+  const item = e.target.closest('.kt-item');
+  if (!item || e.button !== 0 || !app.keytips) return;
+  e.preventDefault();
+  // 入力途中の文字（F → D など）を除いた残りを押す
+  pressKeytips(item.dataset.key.slice(app.keytips.buffer.length));
+});
+
+// スライドショー: クリックで次へ、ホイールで前後
+$('slideshow').addEventListener('mousedown', (e) => {
+  if (!app.show || activeDialog() || e.button !== 0 || e.target.closest('#presenter')) return;
+  e.preventDefault();
+  handleShowKey({ key: 'ArrowRight', code: 'ArrowRight', preventDefault() {} });
+});
+$('slideshow').addEventListener('wheel', (e) => {
+  if (!app.show || activeDialog()) return;
+  const key = e.deltaY > 0 ? 'ArrowRight' : 'ArrowLeft';
+  handleShowKey({ key, code: key, preventDefault() {} });
+}, { passive: true });
 
 // ------------------------------------------------------------------ 起動
 editor.onChange(() => render());
@@ -2472,7 +2709,7 @@ layout();
 renderStats();
 
 openContent('PowerMangai へようこそ', h('div', {},
-  h('p', { text: 'PowerPoint のショートカットキーを覚えるための練習アプリです。マウスは使えません。' }),
+  h('p', { text: 'PowerPoint のショートカットキーを覚えるための練習アプリです。マウスも使えますが、キーボードだけで操作するのがおすすめです。' }),
   h('ul', {},
     h('li', { text: 'F8 … 課題を選ぶ（お手本のスライドを再現して F9 で採点）' }),
     h('li', { text: 'Alt → Y → I … 自分で用意した画像をお手本にして練習' }),

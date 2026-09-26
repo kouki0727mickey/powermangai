@@ -323,6 +323,47 @@ export class Editor {
     return true;
   }
 
+  // ---- マウスのドラッグ（移動・サイズ変更・回転）: ドラッグ全体を 1 回の操作として履歴に積む ----
+  beginGesture() {
+    this.gestureBefore = this.snapshot();
+    this.gesturePres = JSON.stringify(this.pres);
+  }
+
+  /** ドラッグ中の変更（fn で図形を変える）。履歴には積まず、画面だけ更新する */
+  updateGesture(fn) {
+    if (!this.gestureBefore) return;
+    fn();
+    this.fitAll([this.slide.id]);
+    this.revision += 1;
+    this.emit();
+  }
+
+  /** ドラッグの終了。cancel なら開始前に戻す */
+  endGesture(cancel = false) {
+    const before = this.gestureBefore;
+    if (!before) return false;
+    this.gestureBefore = null;
+    if (cancel) { this.restore(before); this.emit(); return false; }
+    if (JSON.stringify(this.pres) === this.gesturePres) return false;
+    this.pushUndo(before);
+    this.redoStack = [];
+    this.outlineMergeKey = null;
+    this.emit();
+    return true;
+  }
+
+  /** 図形の大きさを変える（表は列幅・行の高さを比例させる） */
+  setBox(o, box) {
+    if (o.type === 'table') {
+      const w = Math.max(10, box.w), h = Math.max(10, box.h);
+      o.colWidths = o.colWidths.map((cw) => (cw * w) / o.w);
+      o.rowHeights = o.rowHeights.map((rh) => Math.max(8, (rh * h) / o.h));
+      o.x = box.x; o.y = box.y;
+      return;
+    }
+    Object.assign(o, box);
+  }
+
   // ---- 変形 ----
   updateSelected(fn) {
     if (this.selection.length === 0) return false;
@@ -743,6 +784,31 @@ export class Editor {
     const [a, b] = [Math.min(this.slideAnchor, to), Math.max(this.slideAnchor, to)];
     this.slideSel = this.pres.slides.slice(a, b + 1).map((sl) => sl.id);
     this.selection = [];
+    this.emit();
+  }
+
+  /** Shift+クリック: 基点から i までを選択 */
+  selectSlideRange(i) {
+    if (this.slideAnchor === null) this.slideAnchor = this.slideIndex;
+    const [a, b] = [Math.min(this.slideAnchor, i), Math.max(this.slideAnchor, i)];
+    this.slideIndex = i;
+    this.slideSel = this.pres.slides.slice(a, b + 1).map((sl) => sl.id);
+    this.selection = [];
+    this.editingId = null;
+    this.emit();
+  }
+
+  /** Ctrl+クリック: スライドを選択に追加 / 解除 */
+  toggleSlideInSelection(i) {
+    const id = this.pres.slides[i].id;
+    const cur = this.selectedSlideIndexes().map((k) => this.pres.slides[k].id);
+    const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+    if (!next.length) return;
+    this.slideSel = next.length > 1 ? next : null;
+    this.slideIndex = this.pres.slides.findIndex((sl) => sl.id === (next.includes(id) ? id : next[0]));
+    if (this.slideAnchor === null) this.slideAnchor = this.slideIndex;
+    this.selection = [];
+    this.editingId = null;
     this.emit();
   }
 
@@ -1189,6 +1255,8 @@ export class Editor {
   moveSlide(dir) {
     const idx = this.selectedSlideIndexes();
     const first = idx[0];
+    // 離れたスライドの選択（Ctrl+クリック）はまとめて動かせない
+    if (idx.some((v, k) => v !== first + k)) { this.lastMessage = '連続したスライドを選択してください'; return false; }
     const to = this.mutate(() => {
       const t = moveSlides(this.pres, idx, dir);
       if (t < 0) return t;

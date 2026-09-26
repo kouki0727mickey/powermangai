@@ -16,7 +16,6 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); }
 body { display: flex; flex-direction: column; user-select: none; }
-body.mouse-blocked * { cursor: not-allowed !important; }
 
 #titlebar {
   display: flex; align-items: center; gap: 12px;
@@ -255,3 +254,12 @@ body.mouse-blocked * { cursor: not-allowed !important; }
 .ol-line .ol-text { white-space: pre-wrap; word-break: break-word; flex: 1; }
 .ol-line.current { background: #eef4fb; }
 .ol-line input { flex: 1; font: inherit; border: none; outline: 1px solid var(--focus); padding: 1px 3px; background: #fff; min-width: 0; }
+
+.dlg-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dlg-close { border: none; background: transparent; font-size: 18px; line-height: 1; padding: 2px 8px; cursor: pointer; color: var(--muted); }
+.dlg-close:hover { color: var(--text); background: #eee; }
+.dlg-buttons { display: flex; justify-content: flex-end; gap: 8px; padding: 0 16px 10px; }
+.dlg-buttons button, .palette-extra button { min-width: 72px; padding: 4px 12px; cursor: pointer; }
+.palette-extra { display: flex; gap: 6px; margin-top: 8px; }
+.list li, .gallery .item, .swatch, .palette-none, .table-picker div, .kt-item, .ribbon-tab, .ribbon-qat, .thumb canvas, .sorter-item canvas, .ol-line, .comment { cursor: pointer; }
+.list li:hover, .gallery .item:hover, .kt-item:hover, .ribbon-tab:hover { background: #eef4fb; }
