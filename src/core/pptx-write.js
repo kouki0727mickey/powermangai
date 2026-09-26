@@ -47,12 +47,16 @@ function fontFaces(family) {
   return tag('a:latin', { typeface: family }) + tag('a:ea', { typeface: family }) + tag('a:cs', { typeface: family });
 }
 
+/** 書き出し中のスライドの外部リンク（URL → rId） */
+let linkRel = null;
+
 function rPr(name, f) {
+  const link = f.link && linkRel && name === 'a:rPr' ? tag('a:hlinkClick', { 'r:id': linkRel(f.link) }) : '';
   return tag(name, {
     lang: 'ja-JP', altLang: 'en-US', sz: Math.round(f.size * 100),
     b: f.bold ? 1 : 0, i: f.italic ? 1 : 0, u: f.underline ? 'sng' : undefined, strike: f.strike ? 'sngStrike' : undefined,
     baseline: f.baseline === 'super' ? 30000 : f.baseline === 'sub' ? -25000 : undefined, dirty: 0,
-  }, fill(f.color), fontFaces(f.family));
+  }, fill(f.color), fontFaces(f.family), link);
 }
 
 // ---------------------------------------------------------------- 文字
@@ -87,7 +91,7 @@ function txBodyXml(o, name = 'p:txBody') {
   const ins = o.inset;
   const bodyPr = tag('a:bodyPr', {
     wrap: o.wrap === false ? 'none' : 'square', lIns: emu(ins.l), tIns: emu(ins.t), rIns: emu(ins.r), bIns: emu(ins.b),
-    rtlCol: 0, anchor: { top: 't', middle: 'ctr', bottom: 'b' }[o.anchor] || 't',
+    rtlCol: 0, anchor: { top: 't', middle: 'ctr', bottom: 'b' }[o.anchor] || 't', vert: o.vertical ? 'eaVert' : undefined,
   }, o.autoFit === 'shape' ? tag('a:spAutoFit') : tag('a:noAutofit'));
   return tag(name, {}, bodyPr, tag('a:lstStyle'), o.paragraphs.map(paragraphXml));
 }
@@ -108,6 +112,12 @@ function lnXml(o) {
 
 const shadowXml = (o) => (o.shadow ? tag('a:effectLst', {}, tag('a:outerShdw', { blurRad: 50800, dist: 38100, dir: 2700000, algn: 'tl', rotWithShape: 0 }, tag('a:prstClr', { val: 'black' }, tag('a:alpha', { val: 40000 })))) : '');
 
+/** 図形の名前・代替テキスト・非表示・図形のリンク */
+function cNvPr(o, id, name) {
+  return tag('p:cNvPr', { id, name, descr: o.alt || undefined, hidden: o.hidden ? 1 : undefined },
+    o.link && linkRel ? tag('a:hlinkClick', { 'r:id': linkRel(o.link) }) : '');
+}
+
 function phXml(o, slideCtx) {
   if (!o.ph) return '';
   if (o.ph === 'title') return tag('p:ph', { type: 'title' });
@@ -122,11 +132,11 @@ function spXml(o, id, slideCtx) {
   const name = o.name || `${o.ph ? 'Placeholder' : o.type === 'text' ? 'TextBox' : 'Shape'} ${id}`;
   if (isLine(o)) {
     return tag('p:cxnSp', {},
-      tag('p:nvCxnSpPr', {}, tag('p:cNvPr', { id, name, hidden: o.hidden ? 1 : undefined }), tag('p:cNvCxnSpPr'), tag('p:nvPr')),
+      tag('p:nvCxnSpPr', {}, cNvPr(o, id, name), tag('p:cNvCxnSpPr'), tag('p:nvPr')),
       tag('p:spPr', {}, xfrm(o), tag('a:prstGeom', { prst: 'line' }, tag('a:avLst')), lnXml(o), shadowXml(o)));
   }
   const nv = tag('p:nvSpPr', {},
-    tag('p:cNvPr', { id, name, hidden: o.hidden ? 1 : undefined }),
+    cNvPr(o, id, name),
     tag('p:cNvSpPr', { txBox: o.type === 'text' && !o.ph ? 1 : undefined }, o.ph ? tag('a:spLocks', { noGrp: 1 }) : ''),
     tag('p:nvPr', {}, phXml(o, slideCtx)));
   const spPr = tag('p:spPr', {}, xfrm(o), tag('a:prstGeom', { prst: prstOf(o.type) }, tag('a:avLst')), fill(o.fill, o.opacity ?? 1), lnXml(o), shadowXml(o));
@@ -135,7 +145,7 @@ function spXml(o, id, slideCtx) {
 
 function picXml(o, id, rid) {
   return tag('p:pic', {},
-    tag('p:nvPicPr', {}, tag('p:cNvPr', { id, name: o.name || `Picture ${id}`, hidden: o.hidden ? 1 : undefined }), tag('p:cNvPicPr', {}, tag('a:picLocks', { noChangeAspect: 1 })), tag('p:nvPr')),
+    tag('p:nvPicPr', {}, cNvPr(o, id, o.name || `Picture ${id}`), tag('p:cNvPicPr', {}, tag('a:picLocks', { noChangeAspect: 1 })), tag('p:nvPr')),
     tag('p:blipFill', {}, tag('a:blip', { 'r:embed': rid }), tag('a:stretch', {}, tag('a:fillRect'))),
     tag('p:spPr', {}, xfrm(o), tag('a:prstGeom', { prst: 'rect' }, tag('a:avLst')), o.stroke && o.strokeWidth ? lnXml(o) : '', shadowXml(o)));
 }
@@ -146,7 +156,7 @@ function tableXml(o, id) {
     tag('a:txBody', {}, tag('a:bodyPr'), tag('a:lstStyle'), cell.paragraphs.map(paragraphXml)),
     tag('a:tcPr', { marL: emu(7.2), marR: emu(7.2), marT: emu(3.6), marB: emu(3.6) }, cell.fill ? fill(cell.fill) : '')))));
   return tag('p:graphicFrame', {},
-    tag('p:nvGraphicFramePr', {}, tag('p:cNvPr', { id, name: o.name || `Table ${id}`, hidden: o.hidden ? 1 : undefined }), tag('p:cNvGraphicFramePr', {}, tag('a:graphicFrameLocks', { noGrp: 1 })), tag('p:nvPr')),
+    tag('p:nvGraphicFramePr', {}, cNvPr(o, id, o.name || `Table ${id}`), tag('p:cNvGraphicFramePr', {}, tag('a:graphicFrameLocks', { noGrp: 1 })), tag('p:nvPr')),
     tag('p:xfrm', {}, tag('a:off', { x: emu(o.x), y: emu(o.y) }), tag('a:ext', { cx: emu(o.w), cy: emu(lay.total) })),
     tag('a:graphic', {}, tag('a:graphicData', { uri: 'http://schemas.openxmlformats.org/drawingml/2006/table' },
       tag('a:tbl', {},
@@ -173,8 +183,9 @@ function decodeDataUrl(src) {
 // ---------------------------------------------------------------- スライド
 const TRANS_DIR = { fromRight: 'l', fromLeft: 'r', fromBottom: 'u', fromTop: 'd' };
 
-function transitionXml(tr) {
-  if (!tr) return '';
+function transitionXml(tr, advanceAfter) {
+  const advTm = advanceAfter ? Math.round(advanceAfter * 1000) : undefined;
+  if (!tr) return advTm ? tag('p:transition', { advTm }) : '';
   const spd = tr.duration < 0.5 ? 'fast' : tr.duration > 1 ? 'slow' : 'med';
   const d = TRANS_DIR[tr.direction || 'fromRight'];
   const child = {
@@ -186,12 +197,12 @@ function transitionXml(tr) {
     uncover: tag('p:pull', { dir: d }),
     zoom: tag('p:zoom'),
   }[tr.type];
-  if (!child) return '';
+  if (!child) return advTm ? tag('p:transition', { advTm }) : '';
   // 正確な時間は PowerPoint 2010 以降の p14:dur で書く（古いアプリ用に spd だけの版も付ける）
   const dur = Math.round(tr.duration * 1000);
   return tag('mc:AlternateContent', { 'xmlns:mc': 'http://schemas.openxmlformats.org/markup-compatibility/2006' },
-    tag('mc:Choice', { 'xmlns:p14': 'http://schemas.microsoft.com/office/powerpoint/2010/main', Requires: 'p14' }, tag('p:transition', { spd, 'p14:dur': dur }, child)),
-    tag('mc:Fallback', {}, tag('p:transition', { spd }, child)));
+    tag('mc:Choice', { 'xmlns:p14': 'http://schemas.microsoft.com/office/powerpoint/2010/main', Requires: 'p14' }, tag('p:transition', { spd, 'p14:dur': dur, advTm }, child)),
+    tag('mc:Fallback', {}, tag('p:transition', { spd, advTm }, child)));
 }
 
 // ---------------------------------------------------------------- アニメーション（p:timing）
@@ -279,6 +290,15 @@ function headerFooterXml(pres, slide, index, nextId) {
 }
 
 function slideXml(pres, slide, index, rels) {
+  linkRel = rels.link;
+  try {
+    return slideXmlInner(pres, slide, index, rels);
+  } finally {
+    linkRel = null;
+  }
+}
+
+function slideXmlInner(pres, slide, index, rels) {
   let nid = 1;
   const nextId = () => { nid += 1; return nid; };
   const ctx = { layout: slide.layout, bodyIdx: 0 };
@@ -322,7 +342,7 @@ function slideXml(pres, slide, index, rels) {
   return XML_HEAD + tag('p:sld', { ...nsAttrs, show: slide.hidden ? 0 : undefined },
     tag('p:cSld', {}, bg, tag('p:spTree', {}, spTreeStart(), shapes, headerFooterXml(pres, slide, index, nextId))),
     tag('p:clrMapOvr', {}, tag('a:masterClrMapping')),
-    transitionXml(slide.transition),
+    transitionXml(slide.transition, slide.advanceAfter),
     timingXml(slide, (id, forBuild) => {
       const spid = spids.get(id);
       return forBuild ? (textSpids.has(spid) ? spid : null) : spid;
@@ -439,7 +459,7 @@ function notesSlideXml(text) {
 }
 
 const relsXml = (rels) => XML_HEAD + tag('Relationships', { xmlns: 'http://schemas.openxmlformats.org/package/2006/relationships' },
-  rels.map(([id, type, target]) => tag('Relationship', { Id: id, Type: type.startsWith('http') ? type : `${REL}/${type}`, Target: target })));
+  rels.map(([id, type, target, mode]) => tag('Relationship', { Id: id, Type: type.startsWith('http') ? type : `${REL}/${type}`, Target: target, TargetMode: mode })));
 
 // ---------------------------------------------------------------- パッケージ全体
 /** プレゼンテーション → { パス: 文字列 | Uint8Array } */
@@ -465,7 +485,16 @@ export function buildPptxFiles(pres, { title = '' } = {}) {
       rels.push([id, 'image', `../media/${name}`]);
       return id;
     };
-    files[`ppt/slides/slide${n}.xml`] = slideXml(pres, slide, i, { image: imageRel });
+    const links = new Map();
+    const linkRelFn = (url) => {
+      if (!links.has(url)) {
+        const id = `rId${rels.length + 1}`;
+        rels.push([id, 'hyperlink', url, 'External']);
+        links.set(url, id);
+      }
+      return links.get(url);
+    };
+    files[`ppt/slides/slide${n}.xml`] = slideXml(pres, slide, i, { image: imageRel, link: linkRelFn });
     if (hasNotes && slide.notes && slide.notes.trim()) {
       rels.push([`rId${rels.length + 1}`, 'notesSlide', `../notesSlides/notesSlide${n}.xml`]);
       files[`ppt/notesSlides/notesSlide${n}.xml`] = notesSlideXml(slide.notes);

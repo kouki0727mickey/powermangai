@@ -124,7 +124,12 @@ export class RichEditor {
     st.transformOrigin = `${(obj.w / 2 - tr.x) * scale}px ${(obj.h / 2 - tr.y) * scale}px`;
     st.transform = rot ? `rotate(${rot}deg)` : '';
     st.padding = `${ins.t * scale}px ${ins.r * scale}px ${ins.b * scale}px ${ins.l * scale}px`;
-    st.justifyContent = { top: 'flex-start', middle: 'center', bottom: 'flex-end' }[obj.anchor] || 'flex-start';
+    // 縦書きは列が右から左へ並ぶ。上下の配置は左右の配置になる（上 = 右寄せ）
+    st.flexDirection = obj.vertical ? 'row' : 'column';
+    st.justifyContent = obj.vertical
+      ? ({ top: 'flex-end', middle: 'center', bottom: 'flex-start' }[obj.anchor] || 'flex-end')
+      : ({ top: 'flex-start', middle: 'center', bottom: 'flex-end' }[obj.anchor] || 'flex-start');
+    this.el.style.writingMode = obj.vertical ? 'vertical-rl' : '';
     this.el.style.whiteSpace = obj.wrap === false ? 'pre' : 'pre-wrap';
   }
 
@@ -135,7 +140,10 @@ export class RichEditor {
     const ef = effectiveFont(font, this.theme);
     const s = this.scale;
     const deco = [font.underline ? 'underline' : '', font.strike ? 'line-through' : ''].filter(Boolean).join(' ') || 'none';
-    return `font:${fontCss({ ...ef, size: ef.size * s })};color:${resolveColor(font.color, this.theme)};text-decoration:${deco};`
+    // 縦書きでは半角の英数字は横倒し（PowerPoint と同じ）
+    const color = resolveColor(font.link ? '@hlink' : font.color, this.theme);
+    const decoration = font.link && !deco.includes('underline') ? `underline ${deco === 'none' ? '' : deco}`.trim() : deco;
+    return `font:${fontCss({ ...ef, size: ef.size * s })};color:${color};text-decoration:${decoration};`
       + `vertical-align:${font.baseline === 'super' ? 'super' : font.baseline === 'sub' ? 'sub' : 'baseline'};line-height:inherit`;
   }
 
@@ -440,7 +448,7 @@ export class RichEditor {
     return this.formatRange((f) => { f.baseline = value; });
   }
 
-  setFontProp(prop, value) { return this.formatRange((f) => { f[prop] = value; }); }
+  setFontProp(prop, value) { return this.formatRange((f) => { if (value === undefined) delete f[prop]; else f[prop] = value; }); }
   setFontProps(props) { return this.formatRange((f) => Object.assign(f, props)); }
   changeFontSize(dir) { return this.formatRange((f) => { f.size = stepFontSize(f.size, dir); }); }
   clearFormat() {

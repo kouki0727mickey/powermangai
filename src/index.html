@@ -62,7 +62,16 @@
   <div id="modal-root"></div>
   <div id="toast" role="alert" hidden></div>
   <div id="print-root" hidden></div>
-  <div id="slideshow" hidden><canvas id="show-canvas"></canvas><div id="show-cover"></div></div>
+  <div id="slideshow" hidden>
+    <div id="show-main"><canvas id="show-canvas"></canvas><div id="show-cover"></div></div>
+    <aside id="presenter" hidden>
+      <div class="pv-head"><span id="pv-timer">0:00</span><span id="pv-count"></span></div>
+      <div class="pv-label">次のスライド</div>
+      <canvas id="pv-next"></canvas>
+      <div class="pv-label">ノート</div>
+      <div id="pv-notes"></div>
+    </aside>
+  </div>
 
   <script type="module" src="ui/app.js"></script>
 </body>

@@ -1,6 +1,6 @@
 // Canvas へのスライド描画（編集画面・サムネイル・スライドショー・お手本画像で共通）
 import { SLIDE_W, SLIDE_H, bounds, isLine, hasText } from '../core/model.js';
-import { layoutObjectText, effectiveFont } from '../core/textlayout.js';
+import { layoutObjectText, effectiveFont, layoutVertical } from '../core/textlayout.js';
 import { buildShape, buildDetail, EVENODD } from '../core/shapes.js';
 import { resolveColor, themeOf, DEFAULT_THEME } from '../core/colors.js';
 import { tableLayout, cellDisplayFont } from '../core/table.js';
@@ -63,6 +63,39 @@ function drawArrowHead(ctx, x1, y1, x2, y2, size, color) {
   ctx.restore();
 }
 
+/** リンクの文字はテーマのハイパーリンクの色で下線付き */
+function displayColor(f, theme) {
+  return resolveColor(f.link ? '@hlink' : f.color, theme);
+}
+
+/** 縦書きの文字を描画（原点はオブジェクトの左上） */
+function drawVertical(ctx, o, theme) {
+  const { cols } = layoutVertical(o, measureText, theme);
+  for (const c of cols) {
+    for (const ch of c.chars) {
+      const f = ch.font;
+      ctx.font = fontCss(f);
+      ctx.fillStyle = displayColor(f, theme);
+      ctx.save();
+      if (ch.upright) {
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const sx = ch.shift ? f.size * 0.3 : 0, sy = ch.shift ? -f.size * 0.3 : 0;
+        ctx.fillText(ch.ch, c.x + sx, ch.y + ch.adv / 2 + sy);
+      } else {
+        ctx.translate(c.x, ch.y);
+        ctx.rotate(Math.PI / 2);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(ch.ch, 0, 0);
+      }
+      ctx.restore();
+      // 縦書きの下線は文字の右側
+      if ((f.underline || f.link) && ch.ch.trim()) ctx.fillRect(c.x + c.width / 2 - Math.max(1, f.base / 16), ch.y, Math.max(1, f.base / 16), ch.adv);
+    }
+  }
+}
+
 /** 段落のレイアウト結果を描画（原点はオブジェクトの左上） */
 export function drawTextLines(ctx, lines, theme) {
   ctx.textBaseline = 'alphabetic';
@@ -75,12 +108,11 @@ export function drawTextLines(ctx, lines, theme) {
     for (const s of ln.segs) {
       const f = s.font;
       ctx.font = fontCss(f);
-      const color = resolveColor(f.color, theme);
-      ctx.fillStyle = color;
+      ctx.fillStyle = displayColor(f, theme);
       const y = ln.baseline + (f.dy || 0);
       ctx.fillText(s.text, s.x, y);
       const lw = Math.max(1, f.base / 16);
-      if (f.underline && s.text.trim()) ctx.fillRect(s.x, y + Math.max(1, f.base * 0.1), s.w, lw);
+      if ((f.underline || f.link) && s.text.trim()) ctx.fillRect(s.x, y + Math.max(1, f.base * 0.1), s.w, lw);
       if (f.strike && s.text.trim()) ctx.fillRect(s.x, y - f.size * 0.3, s.w, lw);
     }
   }
@@ -198,8 +230,11 @@ export function drawObject(ctx, o, opts = {}) {
       // 上下反転した図形の文字は 180° 回転（左右反転では文字は反転しない）
       if (o.flipV) ctx.rotate(Math.PI);
       ctx.translate(-o.w / 2, -o.h / 2);
-      const { lines } = layoutObjectText(view, measureText, theme);
-      drawTextLines(ctx, lines, theme);
+      if (o.vertical) drawVertical(ctx, view, theme);
+      else {
+        const { lines } = layoutObjectText(view, measureText, theme);
+        drawTextLines(ctx, lines, theme);
+      }
     }
   }
   ctx.restore();

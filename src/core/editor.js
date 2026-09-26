@@ -23,7 +23,10 @@ export class Editor {
     this.slideIndex = 0;
     this.selection = [];
     this.editingId = null;
-    this.pane = 'editor'; // 'editor' | 'slides' | 'notes' | 'sorter'
+    this._pane = 'editor'; // 'editor' | 'slides' | 'notes' | 'sorter'
+    this.slideSel = null; // スライド一覧での複数選択（スライド ID の配列）
+    this.slideAnchor = null;
+    this.lastDup = null; // 直前の複製（Ctrl+D の間隔を覚えるため）
     this.undoStack = [];
     this.redoStack = [];
     this.clipboard = null; // { kind: 'objects' | 'slides', items, pasteCount }
@@ -82,7 +85,7 @@ export class Editor {
 
   /** 「テキストに合わせて図形のサイズを調整」: 文字の量に合わせて高さを変える */
   fitText(o) {
-    if (o.autoFit !== 'shape' || !hasText(o)) return;
+    if (o.autoFit !== 'shape' || !hasText(o) || o.vertical) return;
     const h = Math.round(layoutObjectText(o, this.measure, this.theme).contentHeight * 10) / 10;
     if (Math.abs(o.h - h) > 0.05) o.h = h;
   }
@@ -662,10 +665,47 @@ export class Editor {
   /** スライド単位の操作をするペインか（スライド一覧・一覧表示） */
   get slidePane() { return this.pane === 'slides' || this.pane === 'sorter'; }
 
+  get pane() { return this._pane; }
+  set pane(v) {
+    this._pane = v;
+    if (v !== 'slides' && v !== 'sorter') this.clearSlideSelection();
+  }
+
+  // ---- スライドの複数選択（スライド一覧で Shift+↑↓ / Ctrl+A） ----
+  clearSlideSelection() { this.slideSel = null; this.slideAnchor = null; }
+
+  /** 操作の対象のスライドの番号（昇順）。複数選択がなければ現在のスライド */
+  selectedSlideIndexes() {
+    if (this.slideSel && this.slideSel.length > 1) {
+      const idx = this.slideSel.map((id) => this.pres.slides.findIndex((s) => s.id === id)).filter((i) => i >= 0).sort((a, b) => a - b);
+      if (idx.length) return idx;
+    }
+    return [this.slideIndex];
+  }
+
+  targetSlides() { return this.selectedSlideIndexes().map((i) => this.pres.slides[i]); }
+
+  /** Shift+↑↓: 選択範囲を広げる / 狭める */
+  extendSlideSelection(dir) {
+    if (this.slideAnchor === null) this.slideAnchor = this.slideIndex;
+    const to = Math.max(0, Math.min(this.pres.slides.length - 1, this.slideIndex + dir));
+    this.slideIndex = to;
+    const [a, b] = [Math.min(this.slideAnchor, to), Math.max(this.slideAnchor, to)];
+    this.slideSel = this.pres.slides.slice(a, b + 1).map((sl) => sl.id);
+    this.selection = [];
+    this.emit();
+  }
+
+  selectAllSlides() {
+    this.slideAnchor = 0;
+    this.slideSel = this.pres.slides.map((sl) => sl.id);
+    this.emit();
+  }
+
   // ---- クリップボード ----
   copy() {
     if (this.slidePane) {
-      this.clipboard = { kind: 'slides', items: [clone(this.slide)], pasteCount: 0 };
+      this.clipboard = { kind: 'slides', items: clone(this.targetSlides()), pasteCount: 0 };
       return true;
     }
     if (this.selection.length === 0) return false;
@@ -707,14 +747,49 @@ export class Editor {
     return true;
   }
 
+  /**
+   * Ctrl+D。複製したものを動かしてからもう一度 Ctrl+D を押すと、同じ間隔で複製する（PowerPoint と同じ）。
+   */
   duplicate() {
     if (this.slidePane || this.selection.length === 0) return this.duplicateSlide();
+    const cur = this.selectedObjects();
+    let dx = PASTE_OFFSET, dy = PASTE_OFFSET;
+    const last = this.lastDup;
+    if (last && last.slideId === this.slide.id && last.newIds.length === this.selection.length && last.newIds.every((id) => this.selection.includes(id))) {
+      dx = cur[0].x - last.srcX;
+      dy = cur[0].y - last.srcY;
+    }
     this.mutate(() => {
-      const objs = reidObjects(clone(this.selectedObjects()));
-      for (const o of objs) { o.x += PASTE_OFFSET; o.y += PASTE_OFFSET; }
+      const objs = reidObjects(clone(cur));
+      for (const o of objs) { o.x += dx; o.y += dy; }
       this.slide.objects.push(...objs);
       this.selection = objs.map((o) => o.id);
+      this.lastDup = { slideId: this.slide.id, newIds: objs.map((o) => o.id), srcX: cur[0].x, srcY: cur[0].y };
     });
+    return true;
+  }
+
+  /** 文字列の方向（縦書き / 横書き）。縦書きのテキスト ボックスは自動調整しない */
+  setVertical(vertical) {
+    return this.updateSelected((o) => {
+      if (!hasText(o)) return;
+      if (vertical) { o.vertical = true; o.autoFit = 'none'; } else delete o.vertical;
+    });
+  }
+
+  /** 図形の変更（種類だけを変え、位置・書式・文字は保つ） */
+  changeShape(type) {
+    return this.setObjectProp('type', type, (o) => !isLine(o) && o.type !== 'image' && o.type !== 'table');
+  }
+
+  /** 図形のハイパーリンク（空文字で解除） */
+  setShapeLink(url) {
+    return this.updateSelected((o) => { if (url) o.link = url; else delete o.link; });
+  }
+
+  /** 自動的に切り替えるまでの秒数（null で解除）。all = すべてのスライド */
+  setAdvanceAfter(sec, all = false) {
+    this.mutate(() => { for (const sl of all ? this.pres.slides : this.targetSlides()) sl.advanceAfter = sec; });
     return true;
   }
 
@@ -821,14 +896,15 @@ export class Editor {
   }
 
   toggleSlideHidden() {
-    this.mutate(() => { this.slide.hidden = !this.slide.hidden; });
-    return this.slide.hidden;
+    const value = !this.slide.hidden;
+    this.mutate(() => { for (const sl of this.targetSlides()) sl.hidden = value; });
+    return value;
   }
 
   /** 背景の色（all = すべてのスライドに適用、null = テーマの背景） */
   setBackground(color, all = false) {
     this.mutate(() => {
-      for (const s of all ? this.pres.slides : [this.slide]) s.background = color;
+      for (const s of all ? this.pres.slides : this.targetSlides()) s.background = color;
     });
     return true;
   }
@@ -923,7 +999,7 @@ export class Editor {
   /** 画面切り替え（all = すべてのスライドに適用） */
   setTransition(patch, all = false) {
     this.mutate(() => {
-      for (const s of all ? this.pres.slides : [this.slide]) {
+      for (const s of all ? this.pres.slides : this.targetSlides()) {
         const next = { type: 'fade', duration: 0.7, ...(s.transition || {}), ...patch };
         s.transition = next.type === 'none' ? null : next;
       }
@@ -998,7 +1074,8 @@ export class Editor {
   // ---- スライド操作 ----
   gotoSlide(index) {
     const i = Math.max(0, Math.min(this.pres.slides.length - 1, index));
-    if (i === this.slideIndex) return false;
+    this.clearSlideSelection();
+    if (i === this.slideIndex) { this.emit(); return false; }
     this.slideIndex = i;
     this.selection = [];
     this.editingId = null;
@@ -1017,34 +1094,46 @@ export class Editor {
     return true;
   }
 
+  /** 選択中のスライドを複製（複数選択なら、最後のスライドの後ろにまとめて） */
   duplicateSlide() {
+    const idx = this.selectedSlideIndexes();
     this.mutate(() => {
-      const copy = reidSlide(clone(this.slide));
-      this.pres.slides.splice(this.slideIndex + 1, 0, copy);
-      this.slideIndex += 1;
+      const copies = idx.map((i) => reidSlide(clone(this.pres.slides[i])));
+      const at = idx[idx.length - 1] + 1;
+      this.pres.slides.splice(at, 0, ...copies);
+      this.slideIndex = at;
+      this.slideSel = copies.length > 1 ? copies.map((c) => c.id) : null;
+      this.slideAnchor = copies.length > 1 ? at : null;
       this.selection = [];
     });
     return true;
   }
 
+  /** 選択中のスライドを削除 */
   deleteSlide() {
+    const idx = this.selectedSlideIndexes();
     this.mutate(() => {
-      this.pres.slides.splice(this.slideIndex, 1);
+      for (const i of [...idx].reverse()) this.pres.slides.splice(i, 1);
       if (this.pres.slides.length === 0) this.pres.slides.push(createSlide('blank', this.size));
-      this.slideIndex = Math.min(this.slideIndex, this.pres.slides.length - 1);
+      this.slideIndex = Math.min(idx[0], this.pres.slides.length - 1);
+      this.clearSlideSelection();
       this.selection = [];
       this.editingId = null;
     });
     return true;
   }
 
+  /** 選択中のスライド（連続した範囲）を dir だけ移動 */
   moveSlide(dir) {
-    const to = this.slideIndex + dir;
-    if (to < 0 || to >= this.pres.slides.length) return false;
+    const idx = this.selectedSlideIndexes();
+    const first = idx[0], count = idx.length;
+    const to = Math.max(0, Math.min(this.pres.slides.length - count, first + dir));
+    if (to === first) return false;
     this.mutate(() => {
-      const [s] = this.pres.slides.splice(this.slideIndex, 1);
-      this.pres.slides.splice(to, 0, s);
-      this.slideIndex = to;
+      const block = this.pres.slides.splice(first, count);
+      this.pres.slides.splice(to, 0, ...block);
+      this.slideIndex += to - first;
+      if (this.slideAnchor !== null) this.slideAnchor += to - first;
     });
     return true;
   }

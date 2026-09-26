@@ -1,5 +1,5 @@
 // Electron メイン プロセス
-import { app, BrowserWindow, Menu, dialog, ipcMain, clipboard } from 'electron';
+import { app, BrowserWindow, Menu, dialog, ipcMain, clipboard, shell } from 'electron';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -149,6 +149,35 @@ ipcMain.handle('print:pdf', async (e, { defaultName }) => {
 ipcMain.handle('print:paper', (e) => new Promise((resolve) => {
   e.sender.print({ printBackground: true }, (ok, reason) => resolve({ ok, reason }));
 }));
+
+// スライドの画像の書き出し（1 枚は保存ダイアログ、複数はフォルダーを選ぶ）
+ipcMain.handle('export:images', async (e, files) => {
+  if (!Array.isArray(files) || !files.length) return null;
+  const win = BrowserWindow.fromWebContents(e.sender);
+  const decode = (f) => {
+    const m = /^data:image\/png;base64,(.+)$/.exec(String(f.dataUrl));
+    if (!m) throw new Error('invalid image');
+    return Buffer.from(m[1], 'base64');
+  };
+  const safeName = (n) => path.basename(String(n)).replace(/[\\/:*?"<>|]/g, '_') || 'slide.png';
+  if (files.length === 1) {
+    const r = await dialog.showSaveDialog(win, { defaultPath: safeName(files[0].name), filters: [{ name: 'PNG', extensions: ['png'] }] });
+    if (r.canceled || !r.filePath) return null;
+    await writeFile(r.filePath, decode(files[0]));
+    return { count: 1 };
+  }
+  const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'], title: '書き出し先のフォルダー' });
+  if (r.canceled || !r.filePaths.length) return null;
+  for (const f of files) await writeFile(path.join(r.filePaths[0], safeName(f.name)), decode(f));
+  return { count: files.length };
+});
+
+// スライドショーのハイパーリンク（http / https / mailto のみ）
+ipcMain.handle('shell:openExternal', async (e, url) => {
+  if (typeof url !== 'string' || !/^(https?:\/\/|mailto:)/i.test(url)) return false;
+  await shell.openExternal(url);
+  return true;
+});
 
 ipcMain.handle('window:fullscreen', (e, flag) => {
   const win = BrowserWindow.fromWebContents(e.sender);

@@ -14,6 +14,7 @@ import { CHALLENGES } from '../core/challenges.js';
 import { scorePresentation, imageSimilarity } from '../core/scoring.js';
 import { drawSlide, drawSelection, drawObject, slideToDataUrl, measureText, setImageLoadCallback } from './render.js';
 import { RichEditor } from './richeditor.js';
+import { isLinkUrl } from '../core/richtext.js';
 import {
   activeDialog, openPalette, openShapeGallery, openGallery, openInput, openList, openConfirm,
   openContent, openHelp, openFontDialog, openSelectionPane, openFormatShape, openTablePicker, openFindReplace, openHeaderFooter,
@@ -21,7 +22,7 @@ import {
 } from './dialogs.js';
 import {
   openPresentationFile, chooseSavePath, writePresentationFile, reportDirty, closeWindow, onSaveAndClose,
-  openImageFile, setFullScreen, readSystemClipboard, writeSystemClipboardText, imageSize, printDocument,
+  openImageFile, setFullScreen, readSystemClipboard, writeSystemClipboardText, imageSize, printDocument, exportImages, openExternal,
 } from './platform.js';
 import { importPptx } from '../core/pptx-read.js';
 import { exportPptx } from '../core/pptx-write.js';
@@ -168,9 +169,12 @@ function renderThumbs() {
     pane.append(h('div', { class: 'thumb' }, h('span', { class: 'num' }), c));
   }
   thumbCache.length = slides.length;
+  const sel = editor.selectedSlideIndexes();
+  const multi = new Set(sel.length > 1 ? sel : []);
   slides.forEach((s, i) => {
     const el = pane.children[i];
     el.classList.toggle('current', i === editor.slideIndex);
+    el.classList.toggle('multi', multi.has(i));
     el.classList.toggle('hidden-slide', !!s.hidden);
     el.querySelector('.num').textContent = String(i + 1);
     const json = JSON.stringify(s) + editor.pres.theme + JSON.stringify(editor.pres.headerFooter) + i;
@@ -256,9 +260,12 @@ function renderSorter() {
     el.append(h('div', { class: 'sorter-item' }, c, h('span', { class: 'num' })));
   }
   sorterCache.length = slides.length;
+  const selIdx = editor.selectedSlideIndexes();
+  const multiSel = new Set(selIdx.length > 1 ? selIdx : []);
   slides.forEach((s, i) => {
     const item = el.children[i];
     item.classList.toggle('current', i === editor.slideIndex);
+    item.classList.toggle('multi', multiSel.has(i));
     item.classList.toggle('hidden-slide', !!s.hidden);
     item.querySelector('.num').textContent = String(i + 1);
     const c = item.querySelector('canvas');
@@ -316,7 +323,8 @@ rich.el.addEventListener('input', () => {
 });
 
 function renderStatus() {
-  $('status-slide').textContent = `スライド ${editor.slideIndex + 1} / ${editor.pres.slides.length}`;
+  const nSel = editor.selectedSlideIndexes().length;
+  $('status-slide').textContent = `スライド ${editor.slideIndex + 1} / ${editor.pres.slides.length}${nSel > 1 ? `（${nSel} 枚選択）` : ''}`;
   $('status-pane').textContent = editor.editingId ? 'テキスト編集中（Esc で終了）'
     : { slides: 'スライド一覧（F6 で編集領域へ）', notes: 'ノート（Esc で編集領域へ）', sorter: 'スライド一覧表示（Enter で標準表示）' }[editor.pane] || '編集領域';
   const sel = editor.selectedObjects();
@@ -466,10 +474,12 @@ const fmt = (textFn, objFn) => (args) => {
 };
 
 /** ダイアログを開く前に編集中の選択範囲を保存し、閉じた後に戻す */
-async function keepTextSelection(fn) {
+async function keepTextSelection(openFn, applyFn) {
+  // ダイアログを閉じた後、選択範囲を戻してから書式を適用する（ダイアログの入力欄に選択が移るため）
   const saved = editor.editingId && rich.active ? rich.getSel() : null;
-  const r = await fn();
+  const r = await openFn();
   if (saved && rich.active) { focusSink(); rich.setSel(saved.anchor, saved.focus); }
+  if (applyFn && r !== null && r !== undefined) await applyFn(r);
   return r;
 }
 
@@ -487,6 +497,7 @@ const TEXT_KEEP = new Set([
   'input:fontSize', 'input:fontFamily', 'palette:fontColor', 'bullets', 'numbering', 'demote', 'promote',
   'lineSpacing1', 'lineSpacing15', 'lineSpacing2', 'gallery:lineSpacing', 'moveParaUp', 'moveParaDown',
   'textUndo', 'textRedo', 'copyFormat', 'pasteFormat', 'textAnchor', 'save', 'saveAs', 'palette:cellFill',
+  'hyperlink', 'insertSymbol', 'textDirection',
 ]);
 
 // ------------------------------------------------------------------ アクション
@@ -638,7 +649,7 @@ const ACTIONS = {
   lineSpacing15: fmt(() => rich.setParaProp('lineSpacing', 1.5), () => editor.setParagraphProp('lineSpacing', 1.5)),
   lineSpacing2: fmt(() => rich.setParaProp('lineSpacing', 2), () => editor.setParagraphProp('lineSpacing', 2)),
   'gallery:lineSpacing': fmt(
-    () => keepTextSelection(async () => { const v = await chooseLineSpacing(); if (v) rich.setParaProp('lineSpacing', v); }),
+    () => keepTextSelection(chooseLineSpacing, (v) => rich.setParaProp('lineSpacing', v)),
     async () => { const v = await chooseLineSpacing(); if (v) editor.setParagraphProp('lineSpacing', v); return true; },
   ),
   textAnchor: (v) => (editor.editingId || editor.selection.length ? editor.setObjectProp('anchor', v, hasText) || needSelection() : needSelection()),
@@ -653,7 +664,7 @@ const ACTIONS = {
     () => (editor.formatClipboard ? editor.pasteFormat() : (setStatus('書式がコピーされていません（Ctrl+Shift+C）'), true)),
   ),
   fontDialog: fmt(
-    () => keepTextSelection(async () => { const r = await openFontDialog(rich.currentFont(), FONT_FAMILIES, editor.theme); if (r) rich.setFontProps(r); }),
+    () => keepTextSelection(() => openFontDialog(rich.currentFont(), FONT_FAMILIES, editor.theme), (r) => rich.setFontProps(r)),
     async () => {
       const font = currentFont();
       if (!font) return false;
@@ -851,6 +862,61 @@ const ACTIONS = {
     else if (v === 'text') pasteTextAsBox(sys.text);
     return true;
   },
+  // スライドの複数選択
+  selectAllSlides: () => editor.selectAllSlides(),
+  extendSlideDown: () => editor.extendSlideSelection(1),
+  extendSlideUp: () => editor.extendSlideSelection(-1),
+
+  // リンク・記号・図形の変更・文字列の方向
+  hyperlink: fmt(
+    () => keepTextSelection(() => inputLink(rich.currentFont().link || ''), (url) => rich.setFontProp('link', url || undefined)),
+    async () => {
+      const url = await inputLink(editor.selectedObjects()[0].link || '');
+      if (url !== null) editor.setShapeLink(url);
+      return true;
+    },
+  ),
+  insertSymbol: async () => {
+    const sym = await keepTextSelection(() => openGallery('記号と特殊文字', SYMBOLS.map((c) => ({ label: c, value: c })), { columns: 12, compact: true }));
+    if (!sym) return;
+    if (editor.editingId && rich.active) { rich.insertText(sym); return; }
+    if (editor.canEdit()) { beginEdit(); rich.insertText(sym); return; }
+    editor.pane = 'editor';
+    editor.insertObject('text');
+    beginEdit();
+    rich.insertText(sym);
+  },
+  'gallery:changeShape': sel(async () => {
+    const type = await openShapeGallery(SHAPE_TYPES.filter((t) => !['line', 'arrow', 'doubleArrow'].includes(t)));
+    if (type && !editor.changeShape(type)) setStatus('この図形は変更できません');
+  }),
+  textDirection: (vertical) => (editor.selection.length ? editor.setVertical(vertical) || needSelection() : needSelection()),
+  'input:advanceAfter': async () => {
+    const v = await openInput('自動的に切り替えるまでの時間（秒、0 で解除）', {
+      value: editor.slide.advanceAfter || 0,
+      validate: (x) => (Number.isFinite(Number(x)) && Number(x) >= 0 && Number(x) <= 3600 ? null : '0〜3600 の秒数を入力してください'),
+    });
+    if (v === null) return;
+    const sec = Number(v);
+    editor.setAdvanceAfter(sec > 0 ? Math.round(sec * 100) / 100 : null);
+    setStatus(sec > 0 ? `スライドショーで ${sec} 秒後に自動的に切り替えます` : '自動的な切り替えを解除しました');
+  },
+  exportPng: async () => {
+    const what = await openList('エクスポート（PNG 画像）', [{ label: 'このスライドだけ', value: 'one' }, { label: 'すべてのスライド', value: 'all' }]);
+    if (!what) return;
+    const { width: W, height: H } = editor.pres;
+    const k = 1920 / W; // 幅 1920 ピクセル
+    const indexes = what === 'one' ? [editor.slideIndex] : editor.pres.slides.map((_, i) => i);
+    const files = indexes.map((i) => ({ name: `スライド${i + 1}.png`, asciiName: `slide${i + 1}.png`, dataUrl: slideToDataUrl(editor.pres, editor.pres.slides[i], Math.round(W * k), Math.round(H * k), i) }));
+    try {
+      const r = await exportImages(files);
+      if (r) setStatus(`${files.length} 枚の画像を書き出しました`);
+    } catch (err) {
+      await openContent('エラー', h('p', { text: `書き出せませんでした: ${err.message}` }));
+    }
+  },
+  presenterView: () => startShow(editor.slideIndex, { presenter: true }),
+
   // 表示
   viewNormal: () => setView('normal'),
   viewSorter: () => setView('sorter'),
@@ -998,10 +1064,10 @@ const ACTIONS = {
     });
   },
   'palette:fontColor': fmt(
-    () => keepTextSelection(async () => {
-      const r = await openPalette('フォントの色', { current: rich.currentFont().color, allowNone: false, theme: editor.theme });
-      if (r) rich.setFontProp('color', r.color);
-    }),
+    () => keepTextSelection(
+      () => openPalette('フォントの色', { current: rich.currentFont().color, allowNone: false, theme: editor.theme }),
+      (r) => rich.setFontProp('color', r.color),
+    ),
     async () => {
       const r = await openPalette('フォントの色', { current: currentFont()?.color, allowNone: false, theme: editor.theme });
       if (r) editor.setFont('color', r.color);
@@ -1009,11 +1075,11 @@ const ACTIONS = {
     },
   ),
   'input:fontSize': fmt(
-    () => keepTextSelection(async () => { const v = await inputFontSize(); if (v !== null) rich.setFontProp('size', v); }),
+    () => keepTextSelection(inputFontSize, (v) => rich.setFontProp('size', v)),
     async () => { const v = await inputFontSize(); if (v !== null) editor.setFont('size', v); return true; },
   ),
   'input:fontFamily': fmt(
-    () => keepTextSelection(async () => { const v = await inputFontFamily(); if (v !== null) rich.setFontProp('family', v); }),
+    () => keepTextSelection(inputFontFamily, (v) => rich.setFontProp('family', v)),
     async () => { const v = await inputFontFamily(); if (v !== null) editor.setFont('family', v); return true; },
   ),
   'input:width': sel(() => inputDimension('w', '幅')),
@@ -1187,6 +1253,28 @@ async function findReplace(replace) {
     if (beginEdit({ cell: m.cell || undefined })) rich.setSel(m.from, m.to);
   }
   app.findMatch = null;
+}
+
+const SYMBOLS = [
+  '①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩', '⑪', '⑫',
+  '→', '←', '↑', '↓', '⇒', '⇔', '↗', '↘', '○', '●', '◎', '×',
+  '△', '▲', '▽', '▼', '□', '■', '◇', '◆', '☆', '★', '※', '〒',
+  '±', '÷', '≠', '≦', '≧', '∞', '√', '∴', '∵', '℃', '％', '‰',
+  '♪', '♂', '♀', '§', '¶', '†', '‡', '©', '®', '™', '€', '£',
+  '「', '」', '『', '』', '【', '】', '〈', '〉', '《', '》', '・', '…',
+];
+
+async function inputLink(current) {
+  const v = await openInput('ハイパーリンク（アドレス。空にすると解除）', {
+    value: current,
+    validate: (x) => {
+      if (!x) return null;
+      const url = /^www\./i.test(x) ? `https://${x}` : x;
+      return isLinkUrl(url) ? null : 'https://… または mailto:… の形式で入力してください';
+    },
+  });
+  if (v === null) return null;
+  return v && /^www\./i.test(v) ? `https://${v}` : v;
 }
 
 async function inputFontSize() {
@@ -1364,13 +1452,14 @@ function visibleSlide(index, dir) {
  *   index（表示中のスライド。スライド数と同じなら「最後です」画面）、steps（アニメーションのステップ）、
  *   done（再生済みのステップ数）、playing（{ step, start } 再生中）、trans（{ prev: canvas, start, tr } 画面切り替え中）
  */
-function startShow(from, { windowed = false, fromStart = false, preview = false } = {}) {
+function startShow(from, { windowed = false, fromStart = false, preview = false, presenter = false } = {}) {
   commitEdit();
   leaveNotes();
   // 最初からのときは非表示スライドを飛ばす（現在のスライドからのときは、そのスライドを表示）
   const index = fromStart ? visibleSlide(0, 1) : from;
-  app.show = { index: -1, cover: '', digits: '', windowed, preview, steps: [], done: 0, playing: null, trans: null };
+  app.show = { index: -1, cover: '', digits: '', windowed, preview, presenter, steps: [], done: 0, playing: null, trans: null, started: Date.now(), link: null };
   $('slideshow').hidden = false;
+  $('presenter').hidden = !presenter;
   if (!windowed) setFullScreen(true);
   sizeShowCanvas();
   enterShowSlide(index, { transition: true });
@@ -1381,6 +1470,8 @@ function startShow(from, { windowed = false, fromStart = false, preview = false 
 function endShow() {
   const windowed = app.show?.windowed;
   if (app.show?.raf) cancelAnimationFrame(app.show.raf);
+  clearTimeout(app.show?.advanceTimer);
+  clearInterval(app.show?.clock);
   app.show = null;
   $('slideshow').hidden = true;
   if (!windowed) setFullScreen(false);
@@ -1389,7 +1480,8 @@ function endShow() {
 }
 
 function sizeShowCanvas() {
-  const vw = window.innerWidth, vh = window.innerHeight;
+  const vw = app.show?.presenter ? $('show-main').clientWidth || window.innerWidth * 0.68 : window.innerWidth;
+  const vh = window.innerHeight;
   const { width: SW, height: SH } = editor.size;
   const scale = Math.min(vw / SW, vh / SH);
   const w = Math.round(SW * scale), hgt = Math.round(SH * scale);
@@ -1419,8 +1511,70 @@ function enterShowSlide(index, { transition = false, allDone = false } = {}) {
   s.done = allDone ? s.steps.length : 0;
   s.playing = null;
   s.trans = prev ? { prev, start: performance.now(), tr: slide.transition } : null;
+  s.link = null;
   if (!s.trans && !allDone) startAutoStep();
+  scheduleAdvance();
+  renderPresenter();
   tickShow();
+}
+
+/** 「自動的に切り替え」: 設定した秒数が経ったら次へ（残りのアニメーションがあれば 1 つずつ再生） */
+function scheduleAdvance() {
+  const s = app.show;
+  clearTimeout(s.advanceTimer);
+  const slide = editor.pres.slides[s.index];
+  if (!slide?.advanceAfter || s.preview) return;
+  const trans = s.trans ? s.trans.tr.duration * 1000 : 0;
+  s.advanceTimer = setTimeout(() => {
+    if (app.show !== s) return;
+    const idx = s.index;
+    showNext();
+    // 同じスライドのアニメーションを再生しただけなら、もう一度待つ
+    if (app.show === s && s.index === idx) scheduleAdvance();
+  }, trans + slide.advanceAfter * 1000);
+}
+
+/** 発表者ビュー: 次のスライド・ノート・経過時間 */
+function renderPresenter() {
+  const s = app.show;
+  if (!s?.presenter) return;
+  const slides = editor.pres.slides;
+  const nextIdx = visibleSlide(s.index + 1, 1);
+  const c = $('pv-next');
+  const w = Math.max(100, $('presenter').clientWidth - 32);
+  const dpr = window.devicePixelRatio || 1;
+  c.width = Math.round(w * dpr);
+  c.height = Math.round(((w * editor.pres.height) / editor.pres.width) * dpr);
+  c.style.height = `${Math.round((w * editor.pres.height) / editor.pres.width)}px`;
+  const ctx = c.getContext('2d');
+  if (nextIdx < slides.length && nextIdx >= 0) drawSlide(ctx, slides[nextIdx], c.width, c.height, { pres: editor.pres, index: nextIdx });
+  else { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, c.width, c.height); }
+  $('pv-notes').textContent = slides[s.index]?.notes || '（ノートはありません）';
+  $('pv-count').textContent = s.index < slides.length ? `${s.index + 1} / ${slides.length}` : '終了';
+  if (!s.clock) {
+    const tick = () => {
+      const sec = Math.floor((Date.now() - s.started) / 1000);
+      $('pv-timer').textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+    };
+    tick();
+    s.clock = setInterval(tick, 1000);
+  }
+}
+
+/** スライドショーのハイパーリンク（図形のリンクと、文字のリンク）: [{ objId, url, rect }] */
+function showLinks() {
+  const s = app.show;
+  const slide = editor.pres.slides[s.index];
+  if (!slide) return [];
+  const out = [];
+  for (const o of slide.objects) {
+    if (o.hidden) continue;
+    const urls = new Set();
+    if (o.link) urls.add(o.link);
+    for (const p of allParas(o)) for (const r of p.runs) if (r.font.link) urls.add(r.font.link);
+    for (const url of urls) out.push({ objId: o.id, url, rect: { x: o.x, y: o.y, w: o.w, h: o.h } });
+  }
+  return out;
 }
 
 /** 先頭のステップが自動再生なら開始 */
@@ -1525,6 +1679,18 @@ function renderShow(now = performance.now()) {
     }
   } else {
     drawShowSlide(ctx, s.index, now);
+    if (s.link !== null) {
+      const l = showLinks()[s.link];
+      if (l) {
+        const k = showCanvas.width / editor.pres.width;
+        ctx.save();
+        ctx.strokeStyle = '#2B579A';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([6, 4]);
+        ctx.strokeRect(l.rect.x * k - 4, l.rect.y * k - 4, l.rect.w * k + 8, l.rect.h * k + 8);
+        ctx.restore();
+      }
+    }
   }
   $('show-cover').className = s.cover;
 }
@@ -1540,10 +1706,24 @@ function handleShowKey(e) {
     return;
   }
   s.digits = '';
+  // ハイパーリンクにフォーカスがあるときの Enter はリンクを開く
+  if (e.key === 'Enter' && s.link !== null) {
+    const l = showLinks()[s.link];
+    if (l) { logKey('Enter', `リンクを開く: ${l.url}`); openExternal(l.url); return; }
+  }
   const b = findBinding(BINDINGS, keyCandidates(e), 'show');
   if (!b) return;
   logKey(eventKeyText(e), b.label);
   const last = editor.pres.slides.length - 1;
+  if (b.action === 'showNextLink' || b.action === 'showPrevLink') {
+    const links = showLinks();
+    if (!links.length) { s.link = null; renderShow(); return; }
+    const dir = b.action === 'showNextLink' ? 1 : -1;
+    s.link = s.link === null ? (dir > 0 ? 0 : links.length - 1) : (s.link + dir + links.length) % links.length;
+    renderShow();
+    return;
+  }
+  s.link = null;
   switch (b.action) {
     case 'showNext':
       if (s.cover) { s.cover = ''; renderShow(); return; }
@@ -1575,7 +1755,7 @@ function handleShowKey(e) {
   renderShow();
 }
 
-window.addEventListener('resize', () => { layout(); if (app.show) { sizeShowCanvas(); renderShow(); } });
+window.addEventListener('resize', () => { layout(); if (app.show) { sizeShowCanvas(); renderShow(); renderPresenter(); } });
 
 // ------------------------------------------------------------------ 練習モード
 function bestKey(id) { return `pmg.best.${id}`; }

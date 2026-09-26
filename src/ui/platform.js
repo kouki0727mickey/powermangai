@@ -124,3 +124,30 @@ export async function printDocument(kind, defaultName) {
   window.print();
   return { path: null };
 }
+
+/** 画像（dataURL）のファイルへの書き出し。1 枚なら保存ダイアログ、複数ならフォルダーを選ぶ */
+export async function exportImages(files) {
+  if (api) return api.exportImages(files);
+  for (const f of files) {
+    // data: URL ではファイル名が無視されるため Blob にする
+    const [head, b64] = f.dataUrl.split(',');
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const blob = new Blob([bytes], { type: head.slice(5, head.indexOf(';')) });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    // ブラウザによっては日本語のファイル名が使えないので、英数字の名前にする
+    a.download = f.asciiName || f.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  return { count: files.length };
+}
+
+/** リンクを既定のブラウザー / メールで開く（http / https / mailto のみ） */
+export async function openExternal(url) {
+  if (api) return api.openExternal(url);
+  window.open(url, '_blank', 'noopener');
+  return true;
+}

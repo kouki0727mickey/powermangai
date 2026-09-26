@@ -218,7 +218,7 @@ test('ヘルプ（F1）で絞り込みできる', async () => {
 
 test('割り当てのないキーは記録され、ブラウザ既定動作は起きない', async () => {
   await fresh();
-  await keys('Control+k');
+  await keys('Control+q');
   assert.match(await page.textContent('#keylog'), /割り当てられていません/);
 });
 
@@ -969,4 +969,109 @@ test('.pptx に保存するとき SVG の画像は PNG に変換される', asyn
   const files = await readZip(buf);
   assert.ok(Object.keys(files).some((f) => /^ppt\/media\/image\d+\.png$/.test(f)));
   assert.ok(!Object.keys(files).some((f) => f.endsWith('.svg')));
+});
+
+// ---------------------------------------------------------------- 追加機能
+test('Ctrl+K: 選択した文字にリンク、図形を選択していれば図形にリンク', async () => {
+  await fresh();
+  await newTextBox('see docs');
+  await keys('Control+Shift+ArrowLeft', 'Control+k');
+  await page.waitForSelector('.dialog input');
+  await page.keyboard.type('www.example.com');
+  await keys('Enter');
+  let ps = await runsOf();
+  assert.deepEqual(ps[0].runs.map((r) => [r.text, r.link || '']), [['see ', ''], ['docs', 'https://www.example.com']]);
+  await keys('Escape', 'Control+k');
+  await page.waitForSelector('.dialog input');
+  await page.keyboard.type('javascript:alert(1)');
+  await keys('Enter');
+  assert.match(await page.textContent('.dialog'), /https/, '不正な URL はエラー');
+  await page.keyboard.press('Control+a');
+  await page.keyboard.type('https://shape.example/');
+  await keys('Enter');
+  assert.equal(await ed(() => __pmg.editor.selectedObjects()[0].link), 'https://shape.example/');
+});
+
+test('記号の挿入（Alt → N → U）・図形の変更（Alt → J → D → E）・縦書き（Alt → H → A → D → V）', async () => {
+  await fresh();
+  await newTextBox('A');
+  await alt('n', 'u');
+  await keys('ArrowRight', 'Enter'); // ②
+  assert.equal(await ed(() => __pmg.text(__pmg.editor.findObject(__pmg.editor.editingId))), 'A②');
+  await keys('Escape');
+  await alt('h', 'a', 'd', 'v');
+  assert.equal(await ed(() => __pmg.editor.selectedObjects()[0].vertical), true);
+  assert.equal(await ed(() => __pmg.editor.selectedObjects()[0].autoFit), 'none');
+  await keys('Enter');
+  assert.equal(await ed(() => getComputedStyle(document.getElementById('text-editor')).writingMode), 'vertical-rl');
+  await keys('Escape');
+  await insertShape(0);
+  await alt('j', 'd', 'e');
+  await keys('ArrowRight', 'ArrowRight', 'Enter'); // 楕円
+  assert.equal((await selObj()).type, 'ellipse');
+  assert.deepEqual(errors, []);
+});
+
+test('スライドの複数選択（Shift+↓）でまとめて削除・非表示', async () => {
+  await fresh();
+  await keys('Control+m', 'Control+m', 'Control+m');
+  await keys('F6', 'F6'); // 編集 → ノート → 一覧
+  assert.equal(await ed(() => __pmg.editor.pane), 'slides');
+  await keys('Home', 'Shift+ArrowDown', 'Shift+ArrowDown');
+  assert.match(await page.textContent('#status-slide'), /3 枚選択/);
+  assert.equal(await page.$$eval('.thumb.multi', (els) => els.length), 3);
+  await alt('s', 'h');
+  assert.deepEqual(await ed(() => __pmg.editor.pres.slides.map((s) => s.hidden)), [true, true, true, false]);
+  await keys('Delete');
+  assert.equal(await ed(() => __pmg.editor.pres.slides.length), 1);
+  await keys('Control+z');
+  assert.equal(await ed(() => __pmg.editor.pres.slides.length), 4);
+});
+
+test('Ctrl+D の間隔を覚える（複製を動かしてからもう一度 Ctrl+D）', async () => {
+  await fresh();
+  await insertShape(0);
+  await keys('Control+d');
+  for (let i = 0; i < 10; i++) await keys('ArrowRight');
+  await keys('ArrowUp', 'ArrowUp');
+  const second = await selObj();
+  await keys('Control+d');
+  const third = await selObj();
+  assert.deepEqual([third.x - second.x, third.y - second.y], [16 + 80, 16 - 16]);
+});
+
+test('発表者ビュー（Alt+F5）: 次のスライドとノート、Tab でリンクを選んで Enter で開く、自動切り替え', async () => {
+  await fresh();
+  await ed(() => {
+    const e = __pmg.editor;
+    e.slide.notes = '話す内容';
+    e.insertObject('rect', { link: 'https://link.example/' });
+    e.newSlide();
+    e.setAdvanceAfter(0.3);
+    e.gotoSlide(0);
+  });
+  await keys('Alt+F5');
+  assert.equal(await page.isVisible('#presenter'), true);
+  assert.equal(await page.textContent('#pv-notes'), '話す内容');
+  assert.equal(await page.textContent('#pv-count'), '1 / 2');
+  await page.context().route('https://link.example/**', (route) => route.fulfill({ body: 'ok' }));
+  const popup = page.waitForEvent('popup');
+  await keys('Tab', 'Enter');
+  assert.equal((await popup).url(), 'https://link.example/');
+  await keys('ArrowRight');
+  assert.equal(await ed(() => __pmg.app.show.index), 1);
+  await page.waitForFunction(() => __pmg.app.show?.index === 2, null, { timeout: 5000 }); // 0.3 秒後に自動で「最後です」へ
+  await keys('Escape');
+});
+
+test('PNG で書き出し（Alt → F → E）', async () => {
+  await fresh();
+  const download = page.waitForEvent('download');
+  await alt('f', 'e');
+  await keys('Enter'); // このスライドだけ
+  const dl = await download;
+  assert.equal(dl.suggestedFilename(), 'slide1.png');
+  const buf = await (await import('node:fs/promises')).readFile(await dl.path());
+  assert.equal(buf.slice(1, 4).toString(), 'PNG');
+  assert.equal(buf.readUInt32BE(16), 1920, '幅 1920 ピクセル');
 });

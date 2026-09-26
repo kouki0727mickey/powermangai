@@ -50,6 +50,7 @@ export const KEYTIPS = {
         { key: 'S', label: '上書き保存', action: 'save' },
         { key: 'A', label: '名前を付けて保存', action: 'saveAs' },
         { key: 'P', label: '印刷 / PDF', action: 'print' },
+        { key: 'E', label: 'エクスポート（PNG 画像）', action: 'exportPng' },
         { key: 'C', label: '閉じる', action: 'closeWindow' },
       ],
     },
@@ -78,6 +79,13 @@ export const KEYTIPS = {
         { key: 'AI', label: 'リストのレベルを上げる（インデント増）', action: 'demote' },
         { key: 'AO', label: 'リストのレベルを下げる（インデント減）', action: 'promote' },
         { key: 'K', label: '行間', action: 'gallery:lineSpacing' },
+        {
+          key: 'AD', label: '文字列の方向',
+          children: [
+            { key: 'H', label: '横書き', action: 'textDirection', args: false },
+            { key: 'V', label: '縦書き', action: 'textDirection', args: true },
+          ],
+        },
         {
           key: 'AT', label: '文字の配置（上下）',
           children: [
@@ -109,6 +117,8 @@ export const KEYTIPS = {
         { key: 'T', label: '表', action: 'insertTable' },
         { key: 'P', label: '画像（このデバイス）', action: 'insertPicture' },
         { key: 'H', label: 'ヘッダーとフッター', action: 'headerFooter' },
+        { key: 'K', label: 'リンク', action: 'hyperlink' },
+        { key: 'U', label: '記号と特殊文字', action: 'insertSymbol' },
         { key: 'D', label: '日付と時刻', action: 'headerFooter' },
         { key: 'SN', label: 'スライド番号', action: 'headerFooter' },
       ],
@@ -154,6 +164,7 @@ export const KEYTIPS = {
         { key: 'SE', label: '図形の効果（影）', action: 'gallery:effects' },
         { key: 'SS', label: '図形のスタイル', action: 'gallery:shapeStyles' },
         { key: 'O', label: '図形の書式設定', action: 'formatShape' },
+        { key: 'E', label: '図形の変更', action: 'gallery:changeShape' },
         { key: 'P', label: '選択ウィンドウ', action: 'selectionPane' },
         { key: 'H', label: '高さ', action: 'input:height' },
         { key: 'W', label: '幅', action: 'input:width' },
@@ -170,6 +181,7 @@ export const KEYTIPS = {
         { key: 'O', label: '効果のオプション（方向）', action: 'transitionOptions' },
         { key: 'D', label: '期間', action: 'input:transitionDuration' },
         { key: 'L', label: 'すべてに適用', action: 'transitionApplyAll' },
+        { key: 'AF', label: '自動的に切り替え（秒）', action: 'input:advanceAfter' },
         { key: 'P', label: 'プレビュー', action: 'previewSlide' },
       ],
     },
@@ -190,6 +202,7 @@ export const KEYTIPS = {
         { key: 'B', label: '最初から', action: 'showFromStart' },
         { key: 'C', label: '現在のスライドから', action: 'showFromCurrent' },
         { key: 'H', label: '非表示スライドに設定 / 解除', action: 'hideSlide' },
+        { key: 'V', label: '発表者ビュー', action: 'presenterView' },
       ],
     },
     {

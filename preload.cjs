@@ -13,5 +13,7 @@ contextBridge.exposeInMainWorld('pmg', {
   readClipboard: () => ipcRenderer.invoke('clipboard:read'),
   printToPDF: (defaultName) => ipcRenderer.invoke('print:pdf', { defaultName }),
   printPaper: () => ipcRenderer.invoke('print:paper'),
+  exportImages: (files) => ipcRenderer.invoke('export:images', files),
+  openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   writeClipboardText: (text) => ipcRenderer.invoke('clipboard:writeText', text),
 });

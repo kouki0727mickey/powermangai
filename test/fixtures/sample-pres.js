@@ -24,6 +24,10 @@ export function samplePresentation() {
   e.insertObject('arrow', { x: 100, y: 400, w: 300, h: 50, stroke: '@accent6', strokeWidth: 3, dash: 'dash' });
   e.insertObject('star', { x: 50, y: 50, w: 80, h: 80 });
   e.slide.transition = { type: 'push', duration: 0.7, direction: 'fromLeft' };
+  e.slide.advanceAfter = 5;
+  const v = e.insertObject('text', { x: 820, y: 120, w: 60, h: 300, text: '縦書きの文', vertical: true, autoFit: 'none', alt: '縦書きの説明' });
+  applyFont(e.findObject(v.id).paragraphs, { p: 0, o: 0 }, { p: 0, o: 2 }, (f) => { f.link = 'https://example.com/tate'; });
+  e.findObject(r.id).link = 'https://example.com/shape';
   e.slide.animations = [
     { target: r.id, effect: 'fade', trigger: 'click', duration: 0.5 },
     { target: body.id, effect: 'flyIn', trigger: 'after', duration: 1, direction: 'fromLeft' },

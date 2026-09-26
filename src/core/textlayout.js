@@ -221,3 +221,65 @@ export function approxMeasure(font, text) {
   for (const ch of text) w += /[\u0000-ÿ]/.test(ch) ? 0.55 : 1;
   return w * font.size;
 }
+
+// ---------------------------------------------------------------- 縦書き
+const ROTATE_IN_VERTICAL = new Set(['ー', '〜', '～', '―', '…', '‥', '－', '-', '(', ')', '（', '）', '「', '」', '『', '』', '［', '］', '【', '】', '〈', '〉', '《', '》', '→', '←']);
+const SHIFT_IN_VERTICAL = new Set(['、', '。', '，', '．', '，']);
+
+/** 縦書きで文字を立てたまま並べるか（全角文字は立てる、半角の英数字は 90° 回転） */
+export function uprightInVertical(ch) {
+  if (ROTATE_IN_VERTICAL.has(ch)) return false;
+  return !/[\u0000-ÿ]/.test(ch);
+}
+
+/**
+ * 縦書きのレイアウト（右から左へ列を並べる）。
+ * 戻り値: { cols: [{ x（列の中心）, width, chars: [{ ch, font, y（文字の上端）, adv, upright, shift }] }], width }
+ * x は右端を 0 とした左向きの距離ではなく、オブジェクト座標（layoutObjectText と同じ）。
+ */
+export function layoutVertical(o, measure, theme = DEFAULT_THEME) {
+  const ins = o.inset;
+  const tr = textRect(o.type, o.w, o.h);
+  const colLen = Math.max(1, tr.h - ins.t - ins.b);
+  const cols = [];
+  o.paragraphs.forEach((p) => {
+    const start = p.level * LEVEL_INDENT;
+    let cur = null;
+    const newCol = (emptySize) => {
+      cur = { chars: [], len: start, size: emptySize || p.runs[0].font.size, lineSpacing: p.lineSpacing, align: p.align };
+      cols.push(cur);
+    };
+    newCol();
+    for (const r of p.runs) {
+      const ef = effectiveFont(r.font, theme);
+      for (const ch of Array.from(r.text)) {
+        if (ch === '\n') { newCol(r.font.size); continue; }
+        const upright = uprightInVertical(ch);
+        const adv = upright ? ef.size : measure(ef, ch);
+        if (cur.chars.length && cur.len + adv > colLen && o.wrap !== false) newCol(r.font.size);
+        cur.chars.push({ ch, font: { ...ef, base: r.font.size }, adv, upright, shift: SHIFT_IN_VERTICAL.has(ch) });
+        cur.len += adv;
+        cur.size = Math.max(cur.chars.length === 1 ? 0 : cur.size, r.font.size);
+      }
+    }
+  });
+  // 列の幅と位置（右端から）
+  let x = tr.x + tr.w - ins.r;
+  let total = 0;
+  for (const c of cols) {
+    c.width = c.size * LINE_FACTOR * c.lineSpacing;
+    total += c.width;
+  }
+  const inner = tr.w - ins.l - ins.r;
+  // 上下の配置は、縦書きでは左右の配置になる（上 = 右寄せ、中央、下 = 左寄せ）
+  if (o.anchor === 'middle') x -= (inner - total) / 2;
+  else if (o.anchor === 'bottom') x -= inner - total;
+  for (const c of cols) {
+    c.x = x - c.width / 2;
+    x -= c.width;
+    const extra = colLen - c.len;
+    let y = tr.y + ins.t + (c.align === 'center' ? extra / 2 : c.align === 'right' ? extra : 0);
+    for (const ch of c.chars) { ch.y = y; y += ch.adv; }
+  }
+  return { cols, width: total };
+}

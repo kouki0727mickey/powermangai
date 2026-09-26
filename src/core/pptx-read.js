@@ -3,7 +3,7 @@ import { readZip } from './zip.js';
 import { parseXml, kid, kids, path as xpath, textOf } from './xml.js';
 import { THEMES, checkCustomTheme, resolveColor, DEFAULT_THEME } from './colors.js';
 import { createObject, createPresentation, createSlide, normalizePresentation, SHAPE_TYPES, newId } from './model.js';
-import { defaultRunFont, normalizeParagraph } from './richtext.js';
+import { defaultRunFont, normalizeParagraph, isLinkUrl } from './richtext.js';
 
 const EMU = 12700;
 const pt = (v) => Math.round((Number(v) / EMU) * 100) / 100;
@@ -58,8 +58,9 @@ class Package {
     const map = {};
     if (!x) return map;
     for (const r of kids(x, 'Relationship')) {
-      if (r.attrs.TargetMode === 'External') continue;
-      map[r.attrs.Id] = { type: (r.attrs.Type || '').split('/').pop(), target: joinPath(dirname(part), r.attrs.Target || '') };
+      const type = (r.attrs.Type || '').split('/').pop();
+      if (r.attrs.TargetMode === 'External') map[r.attrs.Id] = { type, target: r.attrs.Target || '', external: true };
+      else map[r.attrs.Id] = { type, target: joinPath(dirname(part), r.attrs.Target || '') };
     }
     return map;
   }
@@ -187,9 +188,12 @@ function readPPr(p, theme) {
   return o;
 }
 
-function readRPr(r, theme) {
+function readRPr(r, theme, rels) {
   const o = {};
   if (!r) return o;
+  const hl = kid(r, 'a:hlinkClick');
+  const url = hl && rels && rels[hl.attrs['r:id']];
+  if (url && url.external && isLinkUrl(url.target)) o.link = url.target;
   if (r.attrs.sz) o.size = Number(r.attrs.sz) / 100;
   if (r.attrs.b !== undefined) o.bold = r.attrs.b === '1' || r.attrs.b === 'true';
   if (r.attrs.i !== undefined) o.italic = r.attrs.i === '1' || r.attrs.i === 'true';
@@ -363,8 +367,11 @@ class SlideReader {
     const shadow = !!xpath(spPr, 'a:effectLst/a:outerShdw') || (!kid(spPr, 'a:effectLst') && effIdx > 0 && !!this.ctx.effectShadows[effIdx - 1]);
     const fontRefColor = style ? readColor(kids(kid(style, 'a:fontRef'))[0], this.theme) : null;
     const text = this.readTxBody(kid(el, 'p:txBody'), ph, inh, fontRefColor?.value, type);
+    const shapeLink = this.linkOf(cNvPr);
     const obj = createObject(type, {
       ...geo,
+      ...(shapeLink ? { link: shapeLink } : {}),
+      ...(cNvPr?.attrs.descr ? { alt: cNvPr.attrs.descr } : {}),
       hidden: cNvPr?.attrs.hidden === '1' || cNvPr?.attrs.hidden === 'true',
       name: cNvPr?.attrs.name || '',
       fill: fill ? fill.value : null,
@@ -383,6 +390,13 @@ class SlideReader {
     }
     this.spIdMap.set(cNvPr?.attrs.id, obj.id);
     out.push(obj);
+  }
+
+  /** 図形のハイパーリンク（http / https / mailto のみ） */
+  linkOf(cNvPr) {
+    const hl = kid(cNvPr, 'a:hlinkClick');
+    const r = hl && this.rels[hl.attrs['r:id']];
+    return r && r.external && isLinkUrl(r.target) ? r.target : null;
   }
 
   readTxBody(tx, ph, inh, styleFontColor, type) {
@@ -420,7 +434,7 @@ class SlideReader {
       for (const r of kids(p)) {
         if (r.name === 'a:r' || r.name === 'a:fld') {
           const t = textOf(kid(r, 'a:t'));
-          if (t) runs.push({ text: t.replace(/\u000b/g, '\n'), font: { ...paraFont, ...readRPr(kid(r, 'a:rPr'), this.theme) } });
+          if (t) runs.push({ text: t.replace(/\u000b/g, '\n'), font: { ...paraFont, ...readRPr(kid(r, 'a:rPr'), this.theme, this.rels) } });
         } else if (r.name === 'a:br') {
           runs.push({ text: '\n', font: { ...paraFont, ...readRPr(kid(r, 'a:rPr'), this.theme) } });
         }
@@ -433,7 +447,9 @@ class SlideReader {
         runs: runs.map((r) => ({ text: r.text, font: cleanFont(r.font) })),
       });
     });
-    return { paragraphs: paragraphs.length ? paragraphs : undefined, anchor, autoFit, wrap: bp('wrap') !== 'none', inset: insets };
+    const vert = bp('vert');
+    const vertical = ['eaVert', 'vert', 'mongolianVert', 'wordArtVertRtl'].includes(vert);
+    return { paragraphs: paragraphs.length ? paragraphs : undefined, anchor, autoFit: vertical ? 'none' : autoFit, wrap: bp('wrap') !== 'none', inset: insets, ...(vertical ? { vertical: true } : {}) };
   }
 
   readPic(el, transform, groupId, out) {
@@ -450,8 +466,10 @@ class SlideReader {
     if (!mime) { this.ctx.warn(`対応していない画像形式（${ext}）`); return; }
     const lnEl = kid(spPr, 'a:ln');
     const stroke = lnEl ? readFill(lnEl, this.theme) : null;
+    const link = this.linkOf(cNvPr);
     const obj = createObject('image', {
-      ...geo, name: cNvPr?.attrs.name || '', hidden: cNvPr?.attrs.hidden === '1', src: `data:${mime};base64,${toBase64(data)}`, fill: null,
+      ...geo, name: cNvPr?.attrs.name || '', hidden: cNvPr?.attrs.hidden === '1',
+      ...(link ? { link } : {}), ...(cNvPr?.attrs.descr ? { alt: cNvPr.attrs.descr } : {}), src: `data:${mime};base64,${toBase64(data)}`, fill: null,
       stroke: stroke ? stroke.value : null, strokeWidth: lnEl?.attrs.w ? pt(lnEl.attrs.w) : 0, lockAspect: true, groupId: groupId || null,
       shadow: !!xpath(spPr, 'a:effectLst/a:outerShdw'),
     });
@@ -496,6 +514,7 @@ function cleanFont(f) {
     size: Number.isFinite(f.size) && f.size > 0 ? f.size : d.size,
     bold: !!f.bold, italic: !!f.italic, underline: !!f.underline, strike: !!f.strike,
     color: f.color || d.color, baseline: f.baseline || 0,
+    ...(f.link ? { link: f.link } : {}),
   };
 }
 
@@ -547,6 +566,13 @@ function readTransition(sld) {
   const exact = trs.map((tr) => Number(tr.attrs['p14:dur'])).find((v) => v > 0);
   const duration = exact ? exact / 1000 : { fast: 0.5, med: 0.75, slow: 1 }[trs[0].attrs.spd] || 0.7;
   return { type, duration, direction: dir };
+}
+
+function readAdvance(sld) {
+  const trs = [kid(sld, 'p:transition')];
+  for (const alt of kids(sld, 'mc:AlternateContent')) trs.push(kid(kid(alt, 'mc:Choice'), 'p:transition'), kid(kid(alt, 'mc:Fallback'), 'p:transition'));
+  const ms = trs.filter(Boolean).map((t) => Number(t.attrs.advTm)).find((v) => v > 0);
+  return ms ? ms / 1000 : null;
 }
 
 /** p:timing の開始効果（クリック時 / 同時 / 後）を読む */
@@ -631,6 +657,7 @@ export async function importPptx(bytes) {
     slide.background = readBackground(sx, theme) ?? readBackground(reader.layout, theme) ?? readBackground(reader.master, theme) ?? null;
     if (slide.background === '@bg1') slide.background = null;
     slide.transition = readTransition(sx);
+    slide.advanceAfter = readAdvance(sx);
     slide.animations = readAnimations(sx, reader.spIdMap);
     const notesPath = Object.values(reader.rels).find((r) => r.type === 'notesSlide')?.target;
     const nx = pkg.xml(notesPath);

@@ -28,7 +28,7 @@ test('すべての XML が整形式で、関係と Content Types の対象がそ
   for (const [name, content] of Object.entries(files)) {
     if (!name.endsWith('.rels')) continue;
     const base = name.replace(/_rels\/[^/]*\.rels$/, '');
-    for (const m of content.matchAll(/Target="([^"]+)"/g)) {
+    for (const m of content.matchAll(/Target="([^"]+)"(?! TargetMode="External")/g)) {
       const target = path.posix.normalize(path.posix.join(base, m[1]));
       assert.ok(files[target], `${name} → ${target}`);
     }
@@ -53,8 +53,13 @@ for s in p.slides:
     shapes = []
     for sh in s.shapes:
         d = {'type': str(sh.shape_type), 'name': sh.name, 'x': sh.left, 'rot': sh.rotation}
+        try:
+            d['click'] = sh.click_action.hyperlink.address
+        except Exception:
+            pass
         if sh.has_text_frame:
             d['text'] = sh.text_frame.text
+            d['links'] = [r.hyperlink.address for para in sh.text_frame.paragraphs for r in para.runs if r.hyperlink.address]
             runs = [(r.text, r.font.bold, r.font.size.pt if r.font.size else None) for para in sh.text_frame.paragraphs for r in para.runs]
             d['runs'] = runs
             d['levels'] = [para.level for para in sh.text_frame.paragraphs]
@@ -82,6 +87,8 @@ print(json.dumps(out, ensure_ascii=False))
   assert.deepEqual(body.runs[0], ['4月', true, 32]);
   const rounded = s2.shapes.find((sh) => sh.text === '図形の文字');
   assert.equal(rounded.rot, 15);
+  assert.equal(rounded.click, 'https://example.com/shape');
+  assert.deepEqual(s2.shapes.find((sh) => sh.text === '縦書きの文').links, ['https://example.com/tate']);
   assert.ok(s2.shapes.some((sh) => sh.type.includes('LINE') || sh.type.includes('CONNECTOR') || sh.name.startsWith('Shape')));
   const table = s3.shapes.find((sh) => sh.cells);
   assert.deepEqual(table.cells, [['項目', '', ''], ['', '', '150']]);

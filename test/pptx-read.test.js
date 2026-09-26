@@ -41,6 +41,12 @@ test('書き出して読み込むと主な内容が保たれる（往復）', as
   const arrow = s2.objects.find((o) => o.type === 'arrow');
   assert.deepEqual([arrow.stroke, arrow.strokeWidth, arrow.dash], ['@accent6', 3, 'dash']);
   assert.ok(s2.objects.some((o) => o.type === 'star'));
+  const tate = s2.objects.find((o) => o.vertical);
+  assert.equal(objText(tate), '縦書きの文');
+  assert.equal(tate.alt, '縦書きの説明');
+  assert.deepEqual(tate.paragraphs[0].runs.map((r) => [r.text, r.font.link]), [['縦書', 'https://example.com/tate'], ['きの文', undefined]]);
+  assert.equal(rr.link, 'https://example.com/shape');
+  assert.equal(s2.advanceAfter, 5);
   assert.deepEqual(s2.transition, { type: 'push', duration: 0.7, direction: 'fromLeft' }, '正確な時間（p14:dur）');
   const byId = (id) => s2.objects.find((o) => o.id === id);
   assert.deepEqual(s2.animations.map((a) => [a.effect, a.trigger, a.duration, a.direction, byId(a.target)?.type]), [

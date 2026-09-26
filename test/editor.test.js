@@ -249,7 +249,8 @@ test('スライドの追加・移動・削除', () => {
   ed.moveSlide(-1);
   assert.equal(ed.slideIndex, 1);
   assert.equal(ed.pres.slides[1].id, id);
-  assert.equal(ed.moveSlide(-5), false);
+  assert.equal(ed.moveSlide(-5), true, '範囲を超える移動は先頭まで');
+  assert.equal(ed.slideIndex, 0);
   ed.gotoSlide(0);
   assert.equal(ed.moveSlide(-1), false);
   ed.deleteSlide();

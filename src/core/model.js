@@ -1,6 +1,6 @@
 // スライド／図形のデータモデル（DOM に依存しない純粋なロジック）
 import {
-  defaultRunFont, fromPlainText, plainText, normalizeParagraph, ALIGNS, BULLETS, MAX_LEVEL,
+  defaultRunFont, fromPlainText, plainText, normalizeParagraph, ALIGNS, BULLETS, MAX_LEVEL, isLinkUrl,
 } from './richtext.js';
 import { isColorValue, THEMES, checkCustomTheme } from './colors.js';
 import { TRANSITIONS, EFFECTS } from './animation.js';
@@ -146,7 +146,7 @@ export function createSlide(layout = 'blank', size = { width: SLIDE_W, height: S
   const W = size.width, H = size.height;
   const sx = (v) => Math.round((v * W) / SLIDE_W);
   const sy = (v) => Math.round((v * H) / SLIDE_H);
-  const slide = { id: newId('s'), layout, objects: [], background: null, notes: '', hidden: false, transition: null, animations: [] };
+  const slide = { id: newId('s'), layout, objects: [], background: null, notes: '', hidden: false, transition: null, animations: [], advanceAfter: null };
   const title = (y, h) => placeholder('title', sx(60), sy(y), sx(840), sy(h), 'タイトルを入力', { family: '+major', size: 36 });
   const body = (x, w) => placeholder('body', sx(x), sy(130), sx(w), sy(370), 'テキストを入力', { size: 24 }, { bullet: 'bullet' });
   switch (layout) {
@@ -201,6 +201,7 @@ function checkFont(f) {
   const out = defaultRunFont({ family: f.family, size: f.size, color: f.color });
   for (const k of ['bold', 'italic', 'underline', 'strike']) out[k] = f[k] === true;
   out.baseline = f.baseline === 'super' || f.baseline === 'sub' ? f.baseline : 0;
+  if (isLinkUrl(f.link)) out.link = f.link;
   return out;
 }
 
@@ -257,7 +258,12 @@ function checkObject(o) {
   if (!ANCHORS.includes(obj.anchor)) obj.anchor = 'top';
   if (!['shape', 'none'].includes(obj.autoFit)) obj.autoFit = 'none';
   for (const k of ['l', 't', 'r', 'b']) if (!Number.isFinite(obj.inset[k]) || obj.inset[k] < 0) obj.inset[k] = DEFAULT_INSET[k];
-  for (const k of ['flipH', 'flipV', 'shadow', 'hidden', 'wrap']) obj[k] = k === 'wrap' ? obj[k] !== false : obj[k] === true;
+  for (const k of ['flipH', 'flipV', 'shadow', 'hidden', 'wrap', 'vertical']) obj[k] = k === 'wrap' ? obj[k] !== false : obj[k] === true;
+  if (!obj.vertical) delete obj.vertical;
+  obj.link = isLinkUrl(obj.link) ? obj.link : undefined;
+  if (!obj.link) delete obj.link;
+  obj.alt = typeof obj.alt === 'string' ? obj.alt.slice(0, 2000) : '';
+  if (!obj.alt) delete obj.alt;
   if (typeof obj.id !== 'string') obj.id = newId('o');
   if (obj.groupId !== null && typeof obj.groupId !== 'string') obj.groupId = null;
   obj.name = typeof obj.name === 'string' ? obj.name : '';
@@ -292,6 +298,7 @@ function checkSlide(s, size) {
   slide.background = s.background == null ? null : isColorValue(s.background) ? s.background : fail('背景の色が不正です');
   slide.notes = typeof s.notes === 'string' ? s.notes : '';
   slide.hidden = s.hidden === true;
+  slide.advanceAfter = Number.isFinite(s.advanceAfter) && s.advanceAfter > 0 && s.advanceAfter <= 3600 ? s.advanceAfter : null;
   const dirOk = (d) => ['fromBottom', 'fromTop', 'fromLeft', 'fromRight'].includes(d);
   const dur = (d, def) => (Number.isFinite(d) && d > 0 && d <= 60 ? d : def);
   if (s.transition && typeof s.transition === 'object' && TRANSITION_IDS.has(s.transition.type) && s.transition.type !== 'none') {

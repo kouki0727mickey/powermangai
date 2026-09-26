@@ -58,7 +58,13 @@ export function plainText(paras) {
 
 export function sameFont(a, b) {
   return a.family === b.family && a.size === b.size && a.bold === b.bold && a.italic === b.italic
-    && a.underline === b.underline && a.strike === b.strike && a.color === b.color && a.baseline === b.baseline;
+    && a.underline === b.underline && a.strike === b.strike && a.color === b.color && a.baseline === b.baseline
+    && (a.link || '') === (b.link || '');
+}
+
+/** リンクとして使える URL か（http / https / mailto のみ） */
+export function isLinkUrl(u) {
+  return typeof u === 'string' && /^(https?:\/\/|mailto:)[^\s<>"]+$/i.test(u) && u.length <= 2000;
 }
 
 export function normalizeParagraph(p) {

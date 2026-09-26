@@ -131,11 +131,11 @@ function shapeIcon(type) {
 }
 
 /** items: [{ label, value, icon?: HTMLCanvasElement }] */
-export function openGallery(title, items, { columns = 4 } = {}) {
-  const d = new Dialog(title, `矢印キー: 移動 ／ Enter: 決定 ／ 1〜${Math.min(9, items.length)}: 直接選択 ／ Esc: キャンセル`);
-  const grid = h('div', { class: 'gallery', style: { gridTemplateColumns: `repeat(${columns}, 96px)` } });
+export function openGallery(title, items, { columns = 4, compact = false } = {}) {
+  const d = new Dialog(title, compact ? '矢印キー: 移動 ／ Enter: 決定 ／ Esc: キャンセル' : `矢印キー: 移動 ／ Enter: 決定 ／ 1〜${Math.min(9, items.length)}: 直接選択 ／ Esc: キャンセル`);
+  const grid = h('div', { class: `gallery${compact ? ' compact' : ''}`, style: { gridTemplateColumns: `repeat(${columns}, ${compact ? '36px' : '96px'})` } });
   const els = items.map((it, i) => {
-    const el = h('div', { class: 'item' }, it.icon || null, h('div', { text: `${i < 9 ? `${i + 1}. ` : ''}${it.label}` }));
+    const el = h('div', { class: 'item' }, it.icon || null, h('div', { text: compact ? it.label : `${i < 9 ? `${i + 1}. ` : ''}${it.label}` }));
     grid.append(el);
     return el;
   });
@@ -154,7 +154,7 @@ export function openGallery(title, items, { columns = 4 } = {}) {
       case 'Home': sel = 0; break;
       case 'End': sel = n - 1; break;
       default:
-        if (/^[1-9]$/.test(e.key) && Number(e.key) <= n) { d.close(items[Number(e.key) - 1].value); return true; }
+        if (!compact && /^[1-9]$/.test(e.key) && Number(e.key) <= n) { d.close(items[Number(e.key) - 1].value); return true; }
         return true;
     }
     render();
@@ -546,7 +546,11 @@ export function openFormatShape(o, { theme = DEFAULT_THEME, pickColor, isLine = 
   const nameEl = h('input', { type: 'text', id: 'fs-name' });
   nameEl.value = o.name || '';
   fields.push(nameEl);
-  d.body.append(section('その他'), h('div', { class: 'form-row' }, h('label', { for: 'fs-name', text: '名前' }), nameEl));
+  const altEl = h('input', { type: 'text', id: 'fs-alt' });
+  altEl.value = o.alt || '';
+  fields.push(altEl);
+  d.body.append(section('その他'), h('div', { class: 'form-row' }, h('label', { for: 'fs-name', text: '名前' }), nameEl),
+    h('div', { class: 'form-row' }, h('label', { for: 'fs-alt', text: '代替テキスト' }), altEl));
   const err = h('div', { style: { color: 'var(--ng)', minHeight: '18px' } });
   d.body.append(err);
 
@@ -583,6 +587,7 @@ export function openFormatShape(o, { theme = DEFAULT_THEME, pickColor, isLine = 
         dash: val('fs-dash').value,
         shadow: val('fs-shadow').checked,
         name: nameEl.value.trim(),
+        alt: altEl.value.trim(),
       };
       if (!isLine) patch.fill = val('fs-fill').dataset.value || null;
       if (hasText) {
@@ -594,7 +599,7 @@ export function openFormatShape(o, { theme = DEFAULT_THEME, pickColor, isLine = 
       // 変更した項目だけを返す（複数選択のとき、触っていない項目を先頭の図形の値で上書きしないため）
       const orig = {
         x: o.x, y: o.y, w: o.w, h: o.h, rotation: o.rotation, opacity: o.opacity ?? 1, stroke: o.stroke ?? null,
-        strokeWidth: o.strokeWidth, dash: o.dash || 'solid', shadow: !!o.shadow, name: o.name || '', fill: o.fill ?? null,
+        strokeWidth: o.strokeWidth, dash: o.dash || 'solid', shadow: !!o.shadow, name: o.name || '', alt: o.alt || '', fill: o.fill ?? null,
         anchor: o.anchor, autoFit: o.autoFit, wrap: o.wrap !== false,
       };
       const round = (v) => (typeof v === 'number' ? Math.round(v * 100) / 100 : v);
