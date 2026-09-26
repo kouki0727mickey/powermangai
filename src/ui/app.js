@@ -961,7 +961,8 @@ const ACTIONS = {
   deleteComment: () => {
     // 選択中の図形に付いたコメント、無ければスライドの最初のコメント
     const list = editor.slide.comments || [];
-    const c = list.find((x) => x.id === app.lastComment) || list.find((x) => editor.selection.includes(x.target)) || list[0];
+    // 選択中の図形のコメント → このスライドで最後に見たコメント → 最初のコメント
+    const c = list.find((x) => editor.selection.includes(x.target)) || list.find((x) => x.id === app.lastComment) || list[0];
     if (!c) { setStatus('このスライドにはコメントがありません'); return false; }
     editor.deleteComment(c.id);
     setStatus('コメントを削除しました');
@@ -1517,7 +1518,9 @@ async function openComments(opts = {}) {
 
 /** 次 / 前のコメントへ移り、コメント ウィンドウで選ぶ */
 function jumpComment(dir) {
-  const next = editor.adjacentComment(dir, app.lastComment && editor.findComment(app.lastComment) ? app.lastComment : null);
+  // 最後に見たコメントが現在のスライドにあればそこから、無ければ現在のスライドから探す
+  const onSlide = (editor.slide.comments || []).some((c) => c.id === app.lastComment);
+  const next = editor.adjacentComment(dir, onSlide ? app.lastComment : null);
   if (!next) { setStatus('コメントはありません'); return false; }
   commitEdit();
   if (next.slideIndex !== editor.slideIndex) editor.gotoSlide(next.slideIndex);

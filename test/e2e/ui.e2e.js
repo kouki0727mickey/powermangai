@@ -1275,3 +1275,31 @@ test('コメント: Ctrl+Alt+M で追加、返信・編集・解決・削除、A
   assert.deepEqual(await comments(), [[], []]);
   assert.deepEqual(errors, []);
 });
+
+test('コメントの削除は選択中の図形のコメント、次のコメントは現在のスライドから探す', async () => {
+  await fresh();
+  await ed(() => {
+    const e = __pmg.editor;
+    e.addComment('A', 'u');
+    e.setSelection([e.slide.objects[1].id]);
+    e.addComment('B', 'u');
+    e.setSelection([]);
+    for (let i = 0; i < 3; i++) { e.newSlide('blank'); e.addComment(`S${i + 2}`, 'u'); }
+    e.gotoSlide(0);
+  });
+  // A を見てから閉じる
+  await alt('r', 'n');
+  await page.waitForSelector('.comments');
+  await keys('Escape');
+  // サブタイトル（B のコメントが付いた図形）を選択して削除
+  await keys('Tab', 'Tab');
+  await alt('r', 'd', 'd');
+  assert.deepEqual(await ed(() => __pmg.editor.pres.slides[0].comments.map((c) => c.text)), ['A']);
+  // 3 枚目に移って次のコメント → 3 枚目のコメント
+  await ed(() => __pmg.editor.gotoSlide(2));
+  await alt('r', 'n');
+  await page.waitForSelector('.comments');
+  assert.equal(await ed(() => __pmg.editor.slideIndex), 2);
+  assert.match(await page.textContent('.comments'), /S3/);
+  await keys('Escape');
+});
