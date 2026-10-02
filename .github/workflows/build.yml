@@ -9,6 +9,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'リリースする場合のタグ（例: v0.1.0）。空ならビルドだけ'
+        required: false
+        default: ''
 
 concurrency:
   group: build-${{ github.ref }}
@@ -128,7 +133,8 @@ jobs:
 
   release:
     name: リリースに添付
-    if: startsWith(github.ref, 'refs/tags/v')
+    # v から始まるタグのプッシュ、または手動実行で release_tag（v から始まる）を指定したとき
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(inputs.release_tag, 'v')
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -140,5 +146,8 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
+          # 手動実行のときは、ビルドしたコミットにタグを作ってリリースする
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
           files: artifacts/*
           generate_release_notes: true

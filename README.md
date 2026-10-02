@@ -145,5 +145,7 @@ npm run dist:linux       # Linux: AppImage
 出力先は `dist/` です。GitHub にプッシュすると、GitHub Actions（`.github/workflows/build.yml`）が毎回テストを実行し、
 Windows・macOS・Linux 版をビルドします。できたファイルは Actions の実行結果の「Artifacts」からダウンロードできます。
 `v0.2.0` のような `v` で始まるタグをプッシュすると、GitHub のリリースにも添付されます。
+タグをプッシュできない場合は、Actions の「Build desktop app」→「Run workflow」で `release_tag` に `v0.2.0` のように入力して実行すると、
+ビルドしたコミットにタグを作ってリリースします。
 コード署名はしていないため、初回起動時に Windows SmartScreen や macOS Gatekeeper の警告が出ます
 （macOS は右クリック →「開く」で起動できます）。
