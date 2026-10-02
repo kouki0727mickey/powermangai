@@ -22,13 +22,28 @@ function h(tag, props = {}, ...children) {
 }
 export { h };
 
+/** マウスのボタンからキー操作を送るための、キーボード イベントの代わり */
+export function fakeKey(key, mods = {}) {
+  return { key, code: key, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, isComposing: false, repeat: false, preventDefault() {}, stopPropagation() {}, ...mods };
+}
+
 class Dialog {
-  constructor(title, foot, { side = false } = {}) {
+  /** buttons: OK / キャンセルのボタン（OK は okKey、キャンセルは Esc と同じ）。右側のウィンドウには付けない */
+  constructor(title, foot, { side = false, buttons = !side, okKey = fakeKey('Enter') } = {}) {
     this.side = side;
     this.el = h('div', { class: `dialog${side ? ' side' : ''}`, role: 'dialog', 'aria-modal': 'true', 'aria-label': title });
-    this.el.append(h('h2', { text: title }));
+    const close = h('button', { type: 'button', class: 'dlg-close', 'aria-label': '閉じる', title: '閉じる (Esc)', text: '×' });
+    close.addEventListener('click', () => this.handleKey(fakeKey('Escape')));
+    this.el.append(h('div', { class: 'dlg-head' }, h('h2', { text: title }), close));
     this.body = h('div', { class: 'body' });
     this.el.append(this.body);
+    if (buttons) {
+      const ok = h('button', { type: 'button', class: 'dlg-ok', text: 'OK' });
+      const cancel = h('button', { type: 'button', class: 'dlg-cancel', text: 'キャンセル' });
+      ok.addEventListener('click', () => this.handleKey(okKey));
+      cancel.addEventListener('click', () => this.handleKey(fakeKey('Escape')));
+      this.el.append(h('div', { class: 'dlg-buttons' }, ok, cancel));
+    }
     if (foot) this.el.append(h('div', { class: 'foot', text: foot }));
     this.promise = new Promise((resolve) => { this.resolve = resolve; });
     this.prevFocus = null;
@@ -71,10 +86,22 @@ export function openPalette(title, { current = null, allowNone = true, theme = D
   const cells = [];
   grid.forEach((row, r) => row.forEach((c, col) => {
     const sw = h('div', { class: `swatch${r === grid.length - 1 ? ' gap-before' : ''}${r === 1 ? ' gap-before' : ''}`, title: c.name, style: { background: c.hex } });
+    sw.addEventListener('click', () => d.close({ color: c.value }));
     cells.push({ r, col, el: sw, color: c });
     wrap.append(sw);
   }));
   const none = allowNone ? h('div', { class: 'palette-none', text: allowNone ? 'なし (N)' : '' }) : null;
+  none?.addEventListener('click', () => d.close({ color: null }));
+  // 追加の操作（太さ・線の種類など）のボタン
+  if (extra.length) {
+    const bar = h('div', { class: 'palette-extra' });
+    for (const x of extra) {
+      const b = h('button', { type: 'button', text: `${x.label} (${x.key})` });
+      b.addEventListener('click', () => d.close({ action: x.value }));
+      bar.append(b);
+    }
+    d.body.append(bar);
+  }
   const name = h('div', { class: 'palette-name' });
   d.body.append(wrap);
   if (none) d.body.append(none);
@@ -135,7 +162,8 @@ export function openGallery(title, items, { columns = 4, compact = false } = {})
   const d = new Dialog(title, compact ? '矢印キー: 移動 ／ Enter: 決定 ／ Esc: キャンセル' : `矢印キー: 移動 ／ Enter: 決定 ／ 1〜${Math.min(9, items.length)}: 直接選択 ／ Esc: キャンセル`);
   const grid = h('div', { class: `gallery${compact ? ' compact' : ''}`, style: { gridTemplateColumns: `repeat(${columns}, ${compact ? '36px' : '96px'})` } });
   const els = items.map((it, i) => {
-    const el = h('div', { class: 'item' }, it.icon || null, h('div', { text: compact ? it.label : `${i < 9 ? `${i + 1}. ` : ''}${it.label}` }));
+    const el = h('div', { class: 'item', title: it.label }, it.icon || null, h('div', { text: compact ? it.label : `${i < 9 ? `${i + 1}. ` : ''}${it.label}` }));
+    el.addEventListener('click', () => d.close(it.value));
     grid.append(el);
     return el;
   });
@@ -223,6 +251,7 @@ export function openList(title, items, { initial = 0, foot } = {}) {
   const ul = h('ul', { class: 'list' });
   const els = items.map((it, i) => {
     const li = h('li', {}, h('span', { text: `${i < 9 ? `${i + 1}. ` : ''}${it.label}` }), it.sub ? h('span', { class: 'sub', text: it.sub }) : null, it.right ? h('span', { class: 'best', text: it.right }) : null);
+    li.addEventListener('click', () => d.close(it.value));
     ul.append(li);
     return li;
   });
@@ -255,6 +284,8 @@ export function openList(title, items, { initial = 0, foot } = {}) {
 // ---------------------------------------------------------------- 確認・メッセージ
 export function openConfirm(title, message) {
   const d = new Dialog(title, 'Enter / Y: はい ／ Esc / N: いいえ');
+  d.el.querySelector('.dlg-ok').textContent = 'はい';
+  d.el.querySelector('.dlg-cancel').textContent = 'いいえ';
   d.body.append(h('p', { text: message }));
   d.handleKey = (e) => {
     const k = e.key.toLowerCase();
@@ -411,6 +442,20 @@ export function openSelectionPane(api) {
   d.body.append(ul);
   let sel = 0;
   let renaming = null;
+  // クリックで選択（Ctrl / Shift+クリックで追加・解除）、ダブルクリックで名前の変更
+  ul.addEventListener('click', (e) => {
+    const li = e.target.closest('li');
+    const i = [...ul.children].indexOf(li);
+    if (i < 0 || renaming || !api.items()[i]) return;
+    sel = i;
+    d.handleKey(fakeKey(' ', { ctrlKey: e.ctrlKey || e.shiftKey || e.metaKey }));
+  });
+  ul.addEventListener('dblclick', (e) => {
+    const i = [...ul.children].indexOf(e.target.closest('li'));
+    if (i < 0 || renaming || !api.items()[i]) return;
+    sel = i;
+    d.handleKey(fakeKey('F2'));
+  });
   const render = () => {
     const items = api.items();
     sel = Math.max(0, Math.min(items.length - 1, sel));
@@ -629,7 +674,15 @@ export function openTablePicker() {
   const label = h('div', { style: { marginBottom: '6px', fontWeight: 'bold' } });
   const grid = h('div', { class: 'table-picker' });
   const cells = [];
-  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) { const el = h('div'); cells.push({ r, c, el }); grid.append(el); }
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const el = h('div');
+      el.addEventListener('mouseenter', () => { size.r = r + 1; size.c = c + 1; render(); });
+      el.addEventListener('click', () => d.close({ rows: r + 1, cols: c + 1 }));
+      cells.push({ r, c, el });
+      grid.append(el);
+    }
+  }
   d.body.append(label, grid);
   const size = { r: 2, c: 3 };
   const render = () => {
@@ -752,6 +805,12 @@ export function openAnimationPane(api) {
   const ul = h('ul', { class: 'list' });
   d.body.append(ul);
   let sel = 0;
+  ul.addEventListener('click', (e) => {
+    const i = [...ul.children].indexOf(e.target.closest('li'));
+    if (i < 0 || !api.items()[i]) return;
+    sel = i;
+    d.handleKey(fakeKey(' '));
+  });
   const render = () => {
     const items = api.items();
     sel = Math.max(0, Math.min(items.length - 1, sel));
@@ -792,7 +851,8 @@ export function openAnimationPane(api) {
  */
 export function openChartData(chart, { maxCategories = 100, maxSeries = 50 } = {}) {
   const d = new Dialog('データの編集',
-    '矢印 / Tab / Enter: セルの移動 ／ F2: セル内の編集 ／ Insert: 行（分類）を追加 ／ Ctrl+Insert: 列（系列）を追加 ／ Ctrl+Delete: 行を削除 ／ Ctrl+Shift+Delete: 列を削除 ／ Ctrl+Enter: OK ／ Esc: キャンセル');
+    '矢印 / Tab / Enter: セルの移動 ／ F2: セル内の編集 ／ Insert: 行（分類）を追加 ／ Ctrl+Insert: 列（系列）を追加 ／ Ctrl+Delete: 行を削除 ／ Ctrl+Shift+Delete: 列を削除 ／ Ctrl+Enter: OK ／ Esc: キャンセル',
+    { okKey: fakeKey('Enter', { ctrlKey: true }) });
   // grid[r][c]: 文字列。grid[0][0] は使わない
   const grid = [['', ...chart.series.map((s) => s.name)],
     ...chart.categories.map((cat, i) => [cat, ...chart.series.map((s) => (s.values[i] === null || s.values[i] === undefined ? '' : String(s.values[i])))])];
@@ -938,6 +998,12 @@ export function openCommentsPane(api, { start = null, focusId = null } = {}) {
   const box = h('div', { class: 'comments' });
   d.body.append(head, box);
   let sel = 0;
+  box.addEventListener('click', (e) => {
+    const el = e.target.closest('.comment');
+    if (!el || compose || el.classList.contains('composing')) return;
+    const i = [...box.querySelectorAll('.comment:not(.composing)')].indexOf(el);
+    if (i >= 0) { sel = i; render(); }
+  });
   let compose = null; // { mode: 'new' | 'reply' | 'edit', id, replyId, area }
   const fmtDate = (s) => { const t = new Date(s); return Number.isNaN(t.getTime()) ? '' : t.toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'short' }); };
   const flat = () => api.list().flatMap((c) => [{ c }, ...c.replies.map((r) => ({ c, r }))]);

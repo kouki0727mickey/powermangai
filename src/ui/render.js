@@ -432,6 +432,7 @@ export function drawSelection(ctx, slide, selection, width, height, opts = {}) {
   }
   const sel = slide.objects.filter((o) => selection.includes(o.id));
   const groups = new Map();
+  const k = opts.dpr || 1;
   if (opts.cellRect) {
     const c = opts.cellRect;
     ctx.strokeStyle = '#2B579A';
@@ -448,10 +449,10 @@ export function drawSelection(ctx, slide, selection, width, height, opts = {}) {
     ctx.setLineDash(o.id === opts.editingId ? [5, 3] : []);
     if (isLine(o)) {
       const fy = o.flipV ? -1 : 1, fx = o.flipH ? -1 : 1;
-      if (!o.groupId) drawHandlePoints(ctx, [[(-w / 2) * fx, (-h / 2) * fy], [(w / 2) * fx, (h / 2) * fy]]);
+      if (!o.groupId) drawHandlePoints(ctx, [[(-w / 2) * fx, (-h / 2) * fy], [(w / 2) * fx, (h / 2) * fy]], k);
     } else {
       ctx.strokeRect(-w / 2, -h / 2, w, h);
-      if (!o.groupId) drawHandles(ctx, -w / 2, -h / 2, w, h);
+      if (!o.groupId) drawHandles(ctx, -w / 2, -h / 2, w, h, k);
     }
     ctx.restore();
     if (o.groupId) {
@@ -459,38 +460,50 @@ export function drawSelection(ctx, slide, selection, width, height, opts = {}) {
       groups.get(o.groupId).push(o);
     }
   }
+  if (opts.marquee) {
+    // マウスでの範囲選択
+    const m = opts.marquee;
+    ctx.strokeStyle = '#2B579A';
+    ctx.fillStyle = 'rgba(91,155,213,0.12)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    const x = Math.min(m.x1, m.x2) * sx, y = Math.min(m.y1, m.y2) * sy;
+    ctx.fillRect(x, y, Math.abs(m.x2 - m.x1) * sx, Math.abs(m.y2 - m.y1) * sy);
+    ctx.strokeRect(x, y, Math.abs(m.x2 - m.x1) * sx, Math.abs(m.y2 - m.y1) * sy);
+  }
   for (const objs of groups.values()) {
     const b = bounds(objs);
     ctx.strokeStyle = '#7F7F7F';
     ctx.setLineDash([6, 3]);
     ctx.strokeRect(b.x * sx - 4, b.y * sy - 4, b.w * sx + 8, b.h * sy + 8);
     ctx.setLineDash([]);
-    drawHandles(ctx, b.x * sx - 4, b.y * sy - 4, b.w * sx + 8, b.h * sy + 8);
+    drawHandles(ctx, b.x * sx - 4, b.y * sy - 4, b.w * sx + 8, b.h * sy + 8, k);
   }
   ctx.restore();
 }
 
-function drawHandlePoints(ctx, pts) {
+/** k: 画面のピクセル比（ハンドルの大きさを画面上で一定にする） */
+function drawHandlePoints(ctx, pts, k = 1) {
   ctx.setLineDash([]);
   ctx.fillStyle = '#FFFFFF';
   ctx.strokeStyle = '#5B9BD5';
   for (const [px, py] of pts) {
     ctx.beginPath();
-    ctx.arc(px, py, 4, 0, Math.PI * 2);
+    ctx.arc(px, py, 4 * k, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
   }
 }
 
-function drawHandles(ctx, x, y, w, h) {
+function drawHandles(ctx, x, y, w, h, k = 1) {
   drawHandlePoints(ctx, [
     [x, y], [x + w / 2, y], [x + w, y],
     [x, y + h / 2], [x + w, y + h / 2],
     [x, y + h], [x + w / 2, y + h], [x + w, y + h],
-  ]);
-  // 回転ハンドル
+  ], k);
+  // 回転ハンドル（上辺の中央から画面で 18px 上）
   ctx.beginPath();
-  ctx.arc(x + w / 2, y - 18, 5, 0, Math.PI * 2);
+  ctx.arc(x + w / 2, y - 18 * k, 5 * k, 0, Math.PI * 2);
   ctx.stroke();
 }
 

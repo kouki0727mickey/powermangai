@@ -1,7 +1,8 @@
 # PowerMangai — PowerPoint ショートカット練習アプリ
 
 PowerPoint のショートカットキーを覚えるためのデスクトップアプリ（Electron）です。
-**マウスは使えません。** お手本のスライド（画像）を見ながら、キーボードだけで同じスライドを再現する練習をします。
+お手本のスライド（画像）を見ながら、ショートカットキーで同じスライドを再現する練習をします。
+マウスでも操作できます（クリックで選択、ドラッグで移動・サイズ変更・回転、ダブルクリックで文字の編集、リボンやダイアログのクリックなど）。
 
 ## 起動方法
 
@@ -20,7 +21,7 @@ npm start
 **Alt → Y → I** で画像を読み込み、**F9** で現在のスライドとの一致度（%）を表示します。
 
 画面右下には、押したショートカットとその操作名が表示されます。割り当てのないキーを押すと赤く表示されます。
-上部には経過時間・キーを押した回数・マウスを使おうとした回数が表示されます。
+上部には経過時間・キーを押した回数・マウスを使った回数が表示されます（キーボードだけでどこまでできるかの目安）。
 
 ## できること
 
@@ -117,6 +118,21 @@ npm run test:e2e         # E2E テスト（Chromium が必要。CHROMIUM_PATH �
 npm run serve            # ブラウザで動作確認（http://127.0.0.1:8080/）
 xvfb-run -a npm run smoke   # Electron 実機の起動確認（PMG_APP_PATH でビルドしたアプリを指定可）
 ```
+
+### Web 版の公開（Cloudflare Pages）
+
+`src/` がそのまま Web 版です（ビルド不要）。GitHub Actions がテストの後に Cloudflare Pages へ公開します。
+`main` へのプッシュは本番（`https://powermangai.pages.dev`）、ほかのブランチはプレビュー用の URL に公開されます。
+
+初回だけ、次の 2 つを GitHub のリポジトリの Settings → Secrets and variables → Actions に登録してください
+（登録するまでは公開の手順はスキップされます）。
+
+| 名前 | 値 |
+| --- | --- |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare のダッシュボード右側（または URL）に表示されるアカウント ID |
+| `CLOUDFLARE_API_TOKEN` | My Profile → API Tokens → Create Token →「Custom token」で権限 Account / Cloudflare Pages / Edit を付けたトークン |
+
+ブラウザ版では Ctrl+N / Ctrl+W / Ctrl+T など、ブラウザが先に使うキーは練習できません（KeyTips から同じ機能を使えます）。
 
 ### デスクトップ アプリのビルド
 

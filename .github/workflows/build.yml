@@ -93,6 +93,39 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  deploy-web:
+    name: Web 版の公開（Cloudflare Pages）
+    # テストが通ったら公開する。main は本番、それ以外のブランチはプレビュー用の URL に公開する
+    needs: test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: 設定の確認
+        id: check
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::notice::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID が設定されていないため、Web 版の公開をスキップしました（README の「Web 版の公開」を参照）"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.enabled == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.enabled == 'true'
+        with:
+          node-version: 22
+      - name: プロジェクトの作成（初回のみ）
+        if: steps.check.outputs.enabled == 'true'
+        run: npx --yes wrangler@3 pages project create powermangai --production-branch=main || true
+      - name: 公開
+        if: steps.check.outputs.enabled == 'true'
+        run: npx --yes wrangler@3 pages deploy src --project-name=powermangai --branch="${GITHUB_REF_NAME}" --commit-dirty=true
+
   release:
     name: リリースに添付
     if: startsWith(github.ref, 'refs/tags/v')

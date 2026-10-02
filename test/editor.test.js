@@ -360,3 +360,27 @@ test('変更回数（未保存の変更の判定）: 編集中の操作と編集
   e.endEdit();
   assert.equal(e.revision, r2, '何も変えずに終了しても増えない');
 });
+
+test('マウスのドラッグ: 1 回の操作、取り消し・元の位置では未保存にならない、表は開始時から比例', async () => {
+  const { Editor } = await import('../src/core/editor.js');
+  const { createPresentation } = await import('../src/core/model.js');
+  const e = new Editor(createPresentation());
+  const o = e.slide.objects[0];
+  const r0 = e.revision, u0 = e.undoStack.length;
+  e.beginGesture();
+  e.updateGesture(() => { o.x += 10; });
+  e.updateGesture(() => { o.x -= 10; });
+  assert.equal(e.endGesture(), false);
+  assert.equal(e.revision, r0, '元の位置に戻したので未保存にならない');
+  e.beginGesture();
+  e.updateGesture(() => { o.x += 50; });
+  e.endGesture(true);
+  assert.equal(e.revision, r0);
+  assert.equal(e.undoStack.length, u0);
+  const t = e.insertTable(2, 2);
+  const orig = JSON.parse(JSON.stringify(t));
+  e.beginGesture();
+  for (let i = 0; i < 5; i++) e.updateGesture(() => e.setBox(t, { x: t.x, y: t.y, w: orig.w, h: orig.h * 0.5 }, orig));
+  e.endGesture();
+  assert.deepEqual(t.colWidths, orig.colWidths, '同じ大きさへのドラッグを繰り返しても変わらない');
+});

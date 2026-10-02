@@ -156,12 +156,119 @@ test('スライドショー: F5 で開始、→ で進み、最後を越える�
   assert.equal(await page.isVisible('#slideshow'), false);
 });
 
-test('マウス操作はブロックされ、回数が記録される', async () => {
+/** スライドの座標 → 画面の座標 */
+async function screenOf(x, y) {
+  return page.evaluate(({ x, y }) => {
+    const r = document.getElementById('overlay-canvas').getBoundingClientRect();
+    return { x: r.left + x * __pmg.app.scale, y: r.top + y * __pmg.app.scale };
+  }, { x, y });
+}
+
+test('マウス: クリックで選択、ドラッグで移動（1 回で元に戻る）、空白をクリックで解除、回数を記録', async () => {
   await fresh();
-  await page.mouse.click(700, 400);
-  assert.equal(await ed(() => __pmg.app.practice.mouse), 1);
-  assert.equal(await page.isVisible('#toast'), true);
+  await ed(() => { __pmg.editor.slide.objects = []; __pmg.editor.insertObject('rect', { x: 100, y: 100, w: 200, h: 100 }); __pmg.editor.clearSelection(); });
+  const c = await screenOf(200, 150);
+  await page.mouse.click(c.x, c.y);
+  assert.equal(await ed(() => __pmg.editor.selection.length), 1);
+  assert.ok(await ed(() => __pmg.app.practice.mouse) >= 1, 'マウスの回数は記録する');
+  await page.mouse.move(c.x, c.y);
+  await page.mouse.down();
+  const to = await screenOf(250, 180);
+  await page.mouse.move(to.x, to.y, { steps: 5 });
+  await page.mouse.up();
+  const o = () => ed(() => { const x = __pmg.editor.slide.objects[0]; return [Math.round(x.x), Math.round(x.y), Math.round(x.w), Math.round(x.h), x.rotation]; });
+  assert.deepEqual(await o(), [150, 130, 200, 100, 0]);
+  await keys('Control+z');
+  assert.deepEqual(await o(), [100, 100, 200, 100, 0], 'ドラッグ全体が 1 回で戻る');
+  const empty = await screenOf(800, 450);
+  await page.mouse.click(empty.x, empty.y);
   assert.equal(await ed(() => __pmg.editor.selection.length), 0);
+  assert.deepEqual(errors, []);
+});
+
+test('マウス: ハンドルでサイズ変更・回転、範囲選択、Esc でドラッグを取り消し', async () => {
+  await fresh();
+  await ed(() => {
+    const e = __pmg.editor;
+    e.slide.objects = [];
+    e.insertObject('rect', { x: 100, y: 100, w: 200, h: 100 });
+    e.insertObject('ellipse', { x: 400, y: 300, w: 100, h: 100 });
+    e.setSelection([e.slide.objects[0].id]);
+  });
+  const o = (i) => page.evaluate((i) => { const x = __pmg.editor.slide.objects[i]; return [Math.round(x.x), Math.round(x.y), Math.round(x.w), Math.round(x.h), x.rotation]; }, i);
+  // 右下のハンドルを右下へ
+  const se = await screenOf(300, 200);
+  await page.mouse.move(se.x, se.y);
+  await page.mouse.down();
+  const se2 = await screenOf(340, 230);
+  await page.mouse.move(se2.x, se2.y, { steps: 4 });
+  await page.mouse.up();
+  // 画面のピクセルに丸められるので ±1pt まで許す
+  (await o(0)).forEach((v, i) => assert.ok(Math.abs(v - [100, 100, 240, 130, 0][i]) <= 1, `${i}: ${v}`));
+  // 回転ハンドル（上辺の中央から 18px 上）を右へ → 90°
+  const top = await screenOf(220, 100);
+  await page.mouse.move(top.x, top.y - 18);
+  await page.mouse.down();
+  const right = await screenOf(400, 165);
+  await page.mouse.move(right.x, right.y, { steps: 4 });
+  await page.mouse.up();
+  assert.equal((await o(0))[4], 90);
+  // ドラッグ中の Esc で元に戻る
+  const mid = await screenOf(220, 165);
+  await page.mouse.move(mid.x, mid.y);
+  await page.mouse.down();
+  await page.mouse.move(mid.x + 80, mid.y + 40, { steps: 3 });
+  await keys('Escape');
+  await page.mouse.up();
+  assert.deepEqual((await o(0)).slice(0, 2), [100, 100]);
+  // 範囲選択: 2 つとも囲む
+  const a = await screenOf(20, 20), b = await screenOf(900, 520);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 5 });
+  await page.mouse.up();
+  assert.equal(await ed(() => __pmg.editor.selection.length), 2);
+  assert.deepEqual(errors, []);
+});
+
+test('マウス: ダブルクリックで文字の編集、スライド一覧のクリック、リボンのタブと項目、ダイアログのクリック', async () => {
+  await fresh();
+  await keys('Control+m');
+  // タイトルをダブルクリックして入力
+  const t = await ed(() => { const o = __pmg.editor.slide.objects[0]; return { x: o.x + o.w / 2, y: o.y + o.h / 2 }; });
+  const tp = await screenOf(t.x, t.y);
+  await page.mouse.dblclick(tp.x, tp.y);
+  assert.ok(await ed(() => __pmg.editor.editingId));
+  await page.keyboard.type('見出し');
+  // スライド一覧の 1 枚目をクリック（編集は確定する）
+  await page.click('#thumbs .thumb:nth-child(1) canvas');
+  assert.equal(await ed(() => __pmg.editor.slideIndex), 0);
+  assert.equal(await ed(() => __pmg.text(__pmg.editor.pres.slides[1].objects[0])), '見出し');
+  // リボンの「挿入」タブ → 「テキスト ボックス」
+  await page.click('.ribbon-tab[data-key="N"]');
+  await page.click('.kt-item[data-key="X"]');
+  assert.equal(await ed(() => __pmg.editor.slide.objects.at(-1).type), 'text');
+  // 「ホーム」→「図形の塗りつぶし」→ パレットの色をクリック
+  await page.click('.ribbon-tab[data-key="H"]');
+  await page.click('.kt-item[data-key="SF"]');
+  await page.waitForSelector('.palette');
+  await page.click('.palette .swatch:nth-child(15)');
+  assert.ok(await ed(() => __pmg.editor.slide.objects.at(-1).fill));
+  // 挿入 → 図形 → ギャラリーをクリック
+  await page.click('.ribbon-tab[data-key="N"]');
+  await page.click('.kt-item[data-key="SH"]');
+  await page.waitForSelector('.gallery');
+  await page.click('.gallery .item:nth-child(3)');
+  assert.equal(await ed(() => __pmg.editor.slide.objects.length), 4);
+  // ダイアログの × で閉じる
+  await keys('F1');
+  await page.waitForSelector('.dialog');
+  await page.click('.dialog .dlg-close');
+  assert.equal(await page.$('.dialog'), null);
+  // クイック アクセス ツール バーの「元に戻す」
+  await page.click('.ribbon-qat[data-action="qatUndo"]');
+  assert.equal(await ed(() => __pmg.editor.slide.objects.length), 3);
+  assert.deepEqual(errors, []);
 });
 
 test('課題を選んで解き、F9 で 100 点', async () => {
@@ -1362,4 +1469,36 @@ test('アウトライン: 入力はすぐスライドに反映、続けて入力
   await keys('Shift+Enter');
   await page.keyboard.type('B');
   assert.equal(await ed(() => __pmg.text(__pmg.editor.slide.objects[0])), 'A\nB');
+});
+
+test('マウス: スライドショーはクリックで次へ、ノート欄・アウトラインはクリックで移動', async () => {
+  await fresh();
+  await keys('Control+m', 'Control+m');
+  await keys('F5');
+  await page.mouse.click(300, 300);
+  assert.equal(await ed(() => __pmg.app.show.index), 1);
+  await keys('Escape');
+  await page.click('#notes');
+  assert.equal(await ed(() => __pmg.editor.pane), 'notes');
+  await page.keyboard.type('メモ');
+  await alt('w', 'p', 'o');
+  await page.click('#outline .ol-line:nth-child(1)');
+  assert.equal(await ed(() => __pmg.editor.slideIndex), 0);
+  assert.equal(await ed(() => __pmg.editor.pane), 'outline');
+  assert.equal(await ed(() => __pmg.editor.pres.slides[2].notes), 'メモ');
+  assert.deepEqual(errors, []);
+});
+
+test('マウス: ドラッグ中にウィンドウを離れてもキー操作が止まらない', async () => {
+  await fresh();
+  await ed(() => { __pmg.editor.slide.objects = []; __pmg.editor.insertObject('rect', { x: 100, y: 100, w: 200, h: 100 }); });
+  const c = await screenOf(200, 150);
+  await page.mouse.move(c.x, c.y);
+  await page.mouse.down();
+  await page.mouse.move(c.x + 40, c.y + 20, { steps: 3 });
+  await ed(() => window.dispatchEvent(new Event('blur')));
+  assert.equal(await ed(() => __pmg.app.drag), null);
+  await page.mouse.up();
+  await keys('Control+z');
+  assert.deepEqual(await ed(() => [__pmg.editor.slide.objects[0].x, __pmg.editor.slide.objects[0].y]), [100, 100], 'ドラッグは確定し、元に戻せる');
 });

@@ -33,6 +33,7 @@
       "main.js",
       "preload.cjs",
       "src/**/*",
+      "!src/_headers",
       "package.json"
     ],
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
